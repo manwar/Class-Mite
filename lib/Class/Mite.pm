@@ -3,7 +3,7 @@ package Class::Mite;
 use strict;
 use warnings;
 
-our $VERSION   = '0.01';
+our $VERSION   = '0.02';
 our $AUTHORITY = 'cpan:MANWAR';
 
 =head1 NAME
@@ -12,7 +12,7 @@ Class::Mite - A minimal, integrated Class and Role system for Perl
 
 =head1 VERSION
 
-Version 0.01
+Version 0.02
 
 =head1 SYNOPSIS
 

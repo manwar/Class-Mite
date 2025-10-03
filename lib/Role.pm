@@ -1,6 +1,6 @@
 package Role;
 
-$Role::VERSION   = '0.01';
+$Role::VERSION   = '0.02';
 $Role::AUTHORITY = 'cpan:MANWAR';
 
 =head1 NAME
@@ -9,7 +9,7 @@ Role - A lightweight role composition system for Perl
 
 =head1 VERSION
 
-Version 0.01
+Version 0.02
 
 =cut
 

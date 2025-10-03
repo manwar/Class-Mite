@@ -21,9 +21,9 @@ WriteMakefile(
     (eval { ExtUtils::MakeMaker->VERSION(6.46) } ? (META_MERGE => {
         'meta-spec' => { version => 2 },
         provides    => {
-            'Class::Mite' => { file => 'lib/Class/Mite.pm', version => '0.01' },
-            'Class'       => { file => 'lib/Class.pm',      version => '0.01' },
-            'Role'        => { file => 'lib/Role.pm',       version => '0.01' },
+            'Class::Mite' => { file => 'lib/Class/Mite.pm', version => '0.02' },
+            'Class'       => { file => 'lib/Class.pm',      version => '0.02' },
+            'Role'        => { file => 'lib/Role.pm',       version => '0.02' },
         },
         resources   => {
             repository => {

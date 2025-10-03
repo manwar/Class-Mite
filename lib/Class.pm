@@ -231,6 +231,86 @@ Perl's standard C<@ISA> mechanism.
     extends 'ParentClass';
     # ChildClass methods and attributes will override ParentClass's.
 
+=head1 INHERITANCE AND MULTI-PARENT SUPPORT
+
+The C<extends> function now supports **multiple parents** in a single call:
+
+    package Backend;
+    use Class;
+    extends qw/Database File/;
+
+This sets up standard Perl C<@ISA> linearization. You can still call C<extends> multiple times:
+
+    extends 'AnotherParent';
+
+C<Class> automatically handles **diamond inheritance**, ensuring:
+
+=over 4
+
+=item * Parent classes are loaded in order.
+
+=item * C<BUILD> hooks are called **once per class**, even if multiple inheritance paths reach the same ancestor.
+
+=item * C<BUILD> hooks are called in **parent-first order**, consistent with Moo/Moose.
+
+=back
+
+Example:
+
+    package A;
+    use Class;
+    sub BUILD { push @build_log, 'A' }
+
+    package B;
+    use Class;
+    extends 'A';
+    sub BUILD { push @build_log, 'B' }
+
+    package C;
+    use Class;
+    extends 'A';
+    sub BUILD { push @build_log, 'C' }
+
+    package D;
+    use Class;
+    extends qw/B C/;
+    sub BUILD { push @build_log, 'D' }
+
+    package main;
+    use Class;
+
+    my @build_log;
+    my $obj = D->new;
+
+    # @build_log now contains: ('A','B','C','D')
+    # Each BUILD called exactly once, parent-first.
+
+=head1 NEW FEATURES
+
+=over 4
+
+=item * Multi-parent inheritance via C<extends qw/.../>.
+
+=item * Diamond-safe BUILD hook execution (parent-first, single invocation).
+
+=item * Optional C<extends => 'ParentClass'> syntax on C<use Class;>.
+
+=back
+
+=head1 DIAGNOSTICS
+
+=over 4
+
+=item * C<Recursive inheritance detected: Child cannot extend itself>
+
+Thrown if a class attempts to extend itself.
+
+=item * C<BUILD hooks called in wrong order or multiple times>
+
+Will fail tests if diamond-safe BUILD is violated. Use C<@ISA> and C<extends> as documented.
+
+=back
+
 =head1 EXAMPLES
 
 =head2 Basic Usage

@@ -218,7 +218,9 @@ sub extends {
     }
 
     # 2. Add the parent to the caller's @ISA array
+    no strict 'refs';
     push @{"$caller_class\::ISA"}, $parent_class;
+    use strict 'refs';
 }
 
 sub import {

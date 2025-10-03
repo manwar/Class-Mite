@@ -9,6 +9,7 @@ use Test::More;
 # 1. Define a Role
 # -------------------
 package Loggable;
+
 use Role;
 requires qw/get_name/;
 
@@ -16,8 +17,6 @@ sub log_message {
     my ($self, $action) = @_;
     return "User: " . $self->get_name() . " did: $action";
 }
-
-1;
 
 # -------------------
 # 2. Define a Class that consumes the role and uses BUILD
@@ -55,8 +54,6 @@ sub get_full_name {
 sub is_initialized {
     return $_[0]->{initialized};
 }
-
-1;
 
 package main;
 

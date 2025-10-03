@@ -1,4 +1,4 @@
-#!/usr/bin/perl
+#!/usr/bin/env perl
 
 use strict;
 use warnings;
@@ -22,7 +22,7 @@ sub reset_role_system {
     local %Role::METHOD_ALIASES = (); # Ensure aliases are reset too
 }
 
-# Test 1: Role that doesn't use Role.pm properly (2 subtests)
+# Test 1: Role that doesn't use Role.pm properly
 {
     reset_role_system();
 
@@ -44,7 +44,7 @@ END_PACKAGE
     } qr/(is not a role|Failed to load role)/, "Non-role packages are rejected"; # 1
 }
 
-# Test 2: Empty role (2 subtests)
+# Test 2: Empty role
 {
     reset_role_system();
 
@@ -62,7 +62,7 @@ END_PACKAGE
     ok($obj->does('EmptyRole'), "Empty role is correctly recognized"); # 3
 }
 
-# Test 3: Role with normal method names (2 subtests)
+# Test 3: Role with normal method names
 {
     reset_role_system();
 
@@ -80,7 +80,7 @@ END_PACKAGE
     ok($obj->does('NormalRole'), "Role with normal method names works"); # 5
 }
 
-# Test 4: Circular role dependencies (2 subtests)
+# Test 4: Circular role dependencies
 {
     reset_role_system();
 
@@ -105,7 +105,7 @@ END_PACKAGE
     } qr/cannot be composed with/, "Circular dependencies prevented by exclusion"; # 7
 }
 
-# Test 5: Runtime application to instances (2 subtests)
+# Test 5: Runtime application to instances
 {
     reset_role_system();
 
@@ -128,7 +128,7 @@ END_PACKAGE
        "Runtime applied method works on instance"); # 9
 }
 
-# Test 6: Method name with special characters (2 subtests)
+# Test 6: Method name with special characters
 {
     reset_role_system();
 
@@ -147,7 +147,7 @@ END_PACKAGE
     is($obj->MethodWithCaps(), "caps_work", "Capitalized methods work"); # 11
 }
 
-# Test 7: Role inheritance without conflict (3 subtests)
+# Test 7: Role inheritance without conflict
 {
     reset_role_system();
 
@@ -172,7 +172,7 @@ END_PACKAGE
     ok($base->does('InheritedRole'), "Role works in base class"); # 14
 }
 
-# Test 8: Test that UNIVERSAL methods are protected (4 subtests)
+# Test 8: Test that UNIVERSAL methods are protected
 {
     reset_role_system();
 
@@ -193,7 +193,7 @@ END_PACKAGE
     is($obj->safe_method(), "safe", "Role method works"); # 18
 }
 
-# Test 9: Required methods validation in edge cases (1 subtest)
+# Test 9: Required methods validation in edge cases
 {
     reset_role_system();
 
@@ -211,7 +211,7 @@ END_PACKAGE
     } qr/requires method.*that are missing/, "Required methods are properly validated"; # 19
 }
 
-# Test 10: Role vs Role Method Conflict (2 subtests)
+# Test 10: Role vs Role Method Conflict
 {
     reset_role_system();
 

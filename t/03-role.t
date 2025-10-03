@@ -1,8 +1,9 @@
+#!/usr/bin/env perl
+
 use strict;
 use warnings;
 use Test::More;
 
-# Set up the class path for test roles and classes
 use FindBin qw($Bin);
 use lib "$Bin/../lib";
 use lib "$Bin/";
@@ -98,5 +99,4 @@ my $runtime_obj = Class::Runtime->new;
 ok($runtime_obj->does('TestRole::Basic'), 'does() returns true after runtime application');
 can_ok('Class::Runtime', 'common_method');
 
-
-done_testing();
+done_testing;

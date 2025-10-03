@@ -272,62 +272,68 @@ use Exporter;
 our @EXPORT = qw(extends with does);
 our @ISA    = qw(Exporter);
 
+use mro ();
+
 sub new {
     my $class = shift;
     my %attrs = @_;
 
     my $self = bless { %attrs }, $class;
 
-    # Traverse parent chain safely
-    my $cur_class = $class;
-    while ($cur_class) {
-        no strict 'refs';
-        my $build_ref = *{"${cur_class}::BUILD"}{CODE};
-        use strict 'refs';
-
-        if ($build_ref) {
-            $build_ref->($self, \%attrs);
-        }
-
-        # Move to first parent
-        no strict 'refs';
-        $cur_class = @{"${cur_class}::ISA"} ? ${"${cur_class}::ISA"}[0] : undef;
-        use strict 'refs';
-    }
+    _call_all_builds($class, $self, \%attrs);
 
     return $self;
 }
 
-sub extends {
-    my ($caller_class, $parent_class) = @_;
-    my $caller_pkg = caller;
-    $parent_class ||= $caller_class;
-    $caller_class   = $caller_pkg;
+sub _call_all_builds {
+    my ($class, $self, $attrs) = @_;
 
-    # Check if parent package already exists
-    my $stash_exists;
-    {
-        no strict 'refs';
-        $stash_exists = keys %{"${parent_class}::"};
-    }
+    # Use Perl's method resolution order (linearized ISA)
+    my @linear_isa = @{ mro::get_linear_isa($class) };
 
-    unless ($stash_exists) {
-        # Try to load the parent class file if not yet defined
-        my $parent_file = "$parent_class";
-        $parent_file =~ s{::}{/}g;
-        $parent_file .= '.pm';
-
-        eval { require $parent_file };
-        if ($@) {
-            die "Failed to load parent class '$parent_class' from '$parent_file': $@";
+    no strict 'refs';
+    for my $pkg (@linear_isa) {
+        if (my $build_ref = *{"${pkg}::BUILD"}{CODE}) {
+            $build_ref->($self, $attrs);
         }
     }
-
-    # Add the parent to the caller's @ISA
-    no strict 'refs';
-    push @{"${caller_class}::ISA"}, $parent_class
-        unless grep { $_ eq $parent_class } @{"${caller_class}::ISA"};
     use strict 'refs';
+}
+
+sub extends {
+    my ($maybe_class, @maybe_parents) = @_;
+    my $child_class = caller;
+
+    # Handle multiple parents: if called with one scalar, treat as one parent
+    my @parents = @maybe_parents ? ($maybe_class, @maybe_parents) : ($maybe_class);
+
+    for my $parent_class (@parents) {
+        die "Recursive inheritance detected: $child_class cannot extend itself"
+            if $child_class eq $parent_class;
+
+        # Load parent if not yet compiled
+        my $parent_exists;
+        {
+            no strict 'refs';
+            $parent_exists = keys %{"${parent_class}::"};
+        }
+
+        unless ($parent_exists || $INC{"$parent_class.pm"}) {
+            (my $parent_file = "$parent_class.pm") =~ s{::}{/}g;
+            eval { require $parent_file };
+            die "Failed to load parent class '$parent_class' from '$parent_file': $@" if $@;
+        }
+
+        # Avoid duplicate parents
+        use mro ();
+        my @linear = @{ mro::get_linear_isa($child_class) };
+        next if grep { $_ eq $parent_class } @linear;
+
+        # Add parent
+        no strict 'refs';
+        push @{"${child_class}::ISA"}, $parent_class;
+        use strict 'refs';
+    }
 }
 
 sub import {

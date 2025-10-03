@@ -361,9 +361,13 @@ sub _ensure_class_base {
     # We assume the user has a Class.pm file available.
     eval "require Class" unless defined $INC{'Class.pm'};
 
-    if (!$INC{'Class.pm'}) {
-        die "Cannot find or load 'Class.pm'. Please ensure it's in \@INC.";
-    }
+    eval {
+        require Class unless $INC{'Class.pm'};
+        1;
+    } or do {
+        my $err = $@ || 'unknown error';
+        die "Cannot find or load 'Class.pm'. Please ensure it's in \@INC. Error: $err";
+    };
 
     no strict 'refs';
     push @{"${class}::ISA"}, 'Class'

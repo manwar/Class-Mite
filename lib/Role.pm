@@ -26,46 +26,28 @@ my %METHOD_ALIASES;
 
 Quick role definition and consumption:
 
-    # Define a role
-    package Loggable {
-        use Role;
+    package Loggable;
 
-        requires 'get_id';  # Consuming classes must implement this
+    use Role;
+    requires qw/id name/;
 
-        sub log {
-            my ($self, $message) = @_;
-            print "[" . localtime() . "] " . $self->get_id() . ": $message\n";
-        }
+    sub log {
+        my ($self) = @_;
+        return "[" . $self->id . "]: " . $self->name;
     }
 
-    # Use the role in a class
-    package User {
-        use Role 'Loggable';
+    package User;
 
-        sub new {
-            my ($class, $id, $name) = @_;
-            bless { id => $id, name => $name }, $class;
-        }
+    use Class;
+    with qw/Loggable/;
 
-        sub get_id { $_[0]->{id} }  # Satisfies Loggable's requirement
-    }
+    sub id   { shift->{id}   }
+    sub name { shift->{name} }
 
-    # Usage
-    my $user = User->new(123, 'Alice');
-    $user->log('User logged in');  # Works!
+    package main;
 
-Alternative syntax with C<with> and **Method Aliasing** for conflict resolution:
-
-    package Product {
-        use Role;
-        with 'Loggable',
-            {
-                role => 'ConflictingRole',
-                alias => { common_method => 'product_method' }
-            };
-
-        sub get_id { $_[0]->{sku} }
-    }
+    my $user = User->new(id => 1, name => 'Alice');
+    print $user->log, "\n";
 
 Runtime role application:
 

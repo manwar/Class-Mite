@@ -1,7 +1,7 @@
 package Class;
 
-$Class::VERSION    = '0.02';
-$Class::AUTHORITY  = 'cpan:MANWAR';
+$Class::VERSION   = '0.02';
+$Class::AUTHORITY = 'cpan:MANWAR';
 
 =head1 NAME
 
@@ -180,6 +180,10 @@ Perl's standard C<@ISA> mechanism.
 use strict;
 use warnings;
 
+use Exporter;
+our @EXPORT = qw(extends with does);
+our @ISA    = qw(Exporter);
+
 sub new {
     my $class = shift;
     my %attrs = @_;
@@ -196,36 +200,52 @@ sub new {
     return $self;
 }
 
+sub extends {
+    my ($caller_class, $parent_class) = @_;
+
+    my $caller_pkg = caller;
+    $parent_class = $caller_class unless $parent_class;
+    $caller_class = $caller_pkg;
+
+    # 1. Load the parent class file
+    my $parent_file = "$parent_class";
+    $parent_file =~ s/::/\//g;
+    $parent_file .= '.pm';
+
+    eval { require $parent_file; };
+    if ($@) {
+        die "Failed to load parent class '$parent_class' from '$parent_file': $@";
+    }
+
+    # 2. Add the parent to the caller's @ISA array
+    push @{"$caller_class\::ISA"}, $parent_class;
+}
+
 sub import {
     my ($class, @args) = @_;
     my $caller = caller;
 
-    no strict 'refs';
-
-    # Parse arguments for 'extends'
-    my %args = @args;
-    my $parent_class = $args{extends};
-
-    # 1. Handle inheritance via @ISA
-    if (defined $parent_class) {
-        # Check if the class is already in @ISA to avoid warnings,
-        # though 'use' typically only runs once.
-        unless (grep { $_ eq $parent_class } @{"${caller}::ISA"}) {
-            push @{"${caller}::ISA"}, $parent_class;
-        }
-        # Attempt to load the parent class
-        my $parent_file = $parent_class;
-        $parent_file =~ s/::/\//g;
-        $parent_file .= '.pm';
-        eval {
-            require $parent_file;
-        };
-        die "Cannot load parent class '$parent_class': $@" if $@;
+    # --- Step A: Load Role.pm ---
+    # Automatically load Role.pm so we can use its functionality.
+    eval { require Role; };
+    if ($@) {
+        die "Failed to load required dependency Role.pm: $@";
     }
 
-    # 2. Ensure 'Role' is loaded and its 'with' subroutine is available.
-    eval "require Role";
-    Role::_export_with($caller) if defined &{"Role::import"};
+    # --- Step B: Alias Role functions ---
+    *Class::with = \&Role::with;
+    *Class::does = \&Role::does;
+
+    # --- Step C: Handle the old 'extends => Parent' hash syntax (for compatibility) ---
+    if (@args) {
+        if (@args == 2 && $args[0] eq 'extends') {
+            $class->extends($args[1]);
+        }
+    }
+
+    # --- Step D: Export Class subroutines ---
+    # Exporter now exports 'extends', 'with', and 'does'.
+    Exporter::export($class, $caller, @EXPORT);
 }
 
 =head1 DIAGNOSTICS

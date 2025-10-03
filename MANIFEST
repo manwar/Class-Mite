@@ -23,5 +23,6 @@ t/01-basic-test.t
 t/02-edge-case-test.t
 t/03-role.t
 t/04-class-role-integration.t
+t/05-extends-already-loaded.t
 t/manifest.t
 t/pod.t

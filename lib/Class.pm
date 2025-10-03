@@ -190,13 +190,23 @@ sub new {
     my $class = shift;
     my %attrs = @_;
 
-    # 1. Bless the object using the attributes hash
     my $self = bless { %attrs }, $class;
 
-    # 2. Check for and call the BUILD hook
-    # Note: BUILD is not inherited, it's a class-specific hook.
-    if ($self->can('BUILD')) {
-        $self->BUILD({ %attrs });
+    # Traverse parent chain safely
+    my $cur_class = $class;
+    while ($cur_class) {
+        no strict 'refs';
+        my $build_ref = *{"${cur_class}::BUILD"}{CODE};
+        use strict 'refs';
+
+        if ($build_ref) {
+            $build_ref->($self, \%attrs);
+        }
+
+        # Move to first parent
+        no strict 'refs';
+        $cur_class = @{"${cur_class}::ISA"} ? ${"${cur_class}::ISA"}[0] : undef;
+        use strict 'refs';
     }
 
     return $self;
@@ -204,25 +214,33 @@ sub new {
 
 sub extends {
     my ($caller_class, $parent_class) = @_;
-
     my $caller_pkg = caller;
-    $parent_class = $caller_class unless $parent_class;
-    $caller_class = $caller_pkg;
+    $parent_class ||= $caller_class;
+    $caller_class   = $caller_pkg;
 
-    # 1. Load the parent class file
-    my $parent_file = "$parent_class";
-    $parent_file =~ s/::/\//g;
-    $parent_file .= '.pm';
-
-    eval { require $parent_file; };
-    if ($@) {
-        die "Failed to load parent class '$parent_class' from '$parent_file': $@";
+    # Check if parent package already exists
+    my $stash_exists;
+    {
+        no strict 'refs';
+        $stash_exists = keys %{"${parent_class}::"};
     }
 
-    # 2. Add the parent to the caller's @ISA array
-    # Temporarily disable strict 'refs' to safely modify the calling package's @ISA array.
+    unless ($stash_exists) {
+        # Try to load the parent class file if not yet defined
+        my $parent_file = "$parent_class";
+        $parent_file =~ s{::}{/}g;
+        $parent_file .= '.pm';
+
+        eval { require $parent_file };
+        if ($@) {
+            die "Failed to load parent class '$parent_class' from '$parent_file': $@";
+        }
+    }
+
+    # Add the parent to the caller's @ISA
     no strict 'refs';
-    push @{"$caller_class\::ISA"}, $parent_class;
+    push @{"${caller_class}::ISA"}, $parent_class
+        unless grep { $_ eq $parent_class } @{"${caller_class}::ISA"};
     use strict 'refs';
 }
 
@@ -230,35 +248,27 @@ sub import {
     my ($class, @args) = @_;
     my $caller = caller;
 
-    # --- Step A: Load Role.pm ---
-    # Automatically load Role.pm so we can use its functionality.
-    eval { require Role; };
-    if ($@) {
-        die "Failed to load required dependency Role.pm: $@";
+    # Try loading Role.pm, but don't die if it doesn't exist
+    eval { require Role };
+    if (!$@) {
+        *Class::with = \&Role::with;
+        *Class::does = \&Role::does;
+        no strict 'refs';
+        *{"${caller}::with"} = \&Role::with;
+        *{"${caller}::does"} = \&Role::does;
+        use strict 'refs';
     }
 
-    # --- Step B: Alias Role functions ---
-    # Use direct glob assignment (*Package::symbol) to satisfy 'use strict'
-    # and correctly alias the subroutines from Role into Class for export.
-    *Class::with = \&Role::with;
-    *Class::does = \&Role::does;
-
+    # Always install new and extends
     no strict 'refs';
-    *{"${caller}::with"}    = \&Role::with;
-    *{"${caller}::does"}    = \&Role::does;
+    *{"${caller}::new"}     = \&Class::new;
     *{"${caller}::extends"} = \&Class::extends;
     use strict 'refs';
 
-    # --- Step C: Handle the old 'extends => Parent' hash syntax (for compatibility) ---
-    if (@args) {
-        if (@args == 2 && $args[0] eq 'extends') {
-            $class->extends($args[1]);
-        }
+    # optional extends => Parent syntax
+    if (@args && @args == 2 && $args[0] eq 'extends') {
+        $class->extends($args[1]);
     }
-
-    # --- Step D: Export Class subroutines ---
-    # Exporter now exports 'extends', 'with', and 'does'.
-    Exporter::export($class, $caller, @EXPORT);
 }
 
 =head1 DIAGNOSTICS

@@ -13,37 +13,95 @@ Version 0.02
 
 =head1 SYNOPSIS
 
-    package MyApp::Base;
-    use Class;
-
-    sub get_id { shift->{id} }
+=head2 Class ONLY
 
     package MyApp::User;
     use Class;
-    extends 'MyApp::Base';
-    with 'Loggable';
 
-    sub get_name {
-        my $self = shift;
-        return $self->{name};
+    sub BUILD {
+        my ($self, $args)  = @_;
+        $self->{full_name} = join ' ', $args->{first}, $args->{last};
     }
+
+    sub get_name { shift->{full_name} }
+    sub get_id   { shift->{id} }
+
+    package main;
+
+    use strict;
+    use warnings;
+
+    my $user = MyApp::User->new(
+        first => 'John',
+        last  => 'Doe',
+        id    => 42,
+    );
+
+    print $user->get_id;   # 42
+    print $user->get_name; # John Doe
+
+=head2 Class with Inheritance
+
+    package MyApp::Person;
+    use Class;
+
+    sub BUILD {
+        my ($self, $args)  = @_;
+        $self->{full_name} = join ' ', $args->{first}, $args->{last};
+    }
+
+    sub get_name { shift->{full_name} }
+
+    package MyApp::Employee;
+    use Class;
+    extends qw/MyApp::Person/;
+
+    sub get_id { shift->{id} }
+
+    package main;
+
+    use strict;
+    use warnings;
+
+    my $emp = MyApp::Employee->new(
+        first => 'John',
+        last  => 'Doe',
+        id    => 42
+    );
+
+    print $user->get_id;   # 42
+    print $user->get_name; # John Doe
+
+=head2 Class with Role
+
+    package Loggable;
+    use Role;
+    requires qw/get_name/;
+
+    sub log {
+        my ($self, $msg) = @_;
+        return "[LOG] $msg\n";
+    }
+
+    package MyApp::Admin;
+    use Class;
+    with qw/Loggable/;
 
     sub BUILD {
         my ($self, $args) = @_;
-        $self->{full_name} = $args->{name} . ' ' . $args->{surname};
-        delete $self->{surname}; # cleanup after initialization
+        $self->{name} = $args->{name};
     }
 
-    # later
-    my $user = MyApp::User->new(
-        name    => 'Jane',
-        surname => 'Doe',
-        id      => 42,
-    );
+    sub get_name { shift->{name} }
 
-    say $user->get_name;    # Jane
-    say $user->{full_name}; # Jane Doe
-    say $user->get_id;      # 42 (inherited from MyApp::Base)
+    package main;
+    use strict;
+    use warnings;
+
+    my $admin = MyApp::Admin->new(name => 'Alice');
+
+    print $admin->get_name;              # Alice
+    print $admin->log("Admin created");  # [LOG] Admin created
 
 =head1 DESCRIPTION
 

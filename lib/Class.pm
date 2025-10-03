@@ -354,45 +354,105 @@ our @ISA    = qw(Exporter);
 
 use mro ();
 
+# Cache for BUILD method orders to avoid recalculating for every object
+my %BUILD_ORDER_CACHE;
+
 sub new {
     my $class = shift;
     my %attrs = @_;
-
     my $self = bless { %attrs }, $class;
 
-    # Diamond-safe, parent-first BUILD calls
-    my %seen;
-    my @order;
+    # Use cached BUILD order or calculate and cache it
+    my $build_order = $BUILD_ORDER_CACHE{$class} ||= do {
+        my %seen;
+        my @order;
 
-    # DFS to collect parents first
-    my $collect;
-    $collect = sub {
-        my ($cur) = @_;
-        return if $seen{$cur}++;
-        no strict 'refs';
-        $collect->($_) for @{"${cur}::ISA"};
-        use strict 'refs';
-        push @order, $cur;
+        # Exact replication of original recursive DFS using iterative approach
+        my @stack = ([$class, 0]);  # [class, state] where state: 0=pre, 1=post
+
+        while (@stack) {
+            my ($cur, $state) = @{pop @stack};
+
+            if ($state) {
+                # Post-order: add to order after processing children
+                push @order, $cur;
+                next;
+            }
+
+            next if $seen{$cur}++;
+
+            # Push current node for post-order processing
+            push @stack, [$cur, 1];
+
+            # Push all parents in reverse order (to maintain original order)
+            no strict 'refs';
+            my @parents = @{"${cur}::ISA"};
+            use strict 'refs';
+
+            for (reverse @parents) {
+                push @stack, [$_, 0] unless $seen{$_};
+            }
+        }
+
+        \@order;
     };
 
-    $collect->($class);
-
-    # Call BUILD in parent-first order
-    for my $c (@order) {
+    # Call BUILD methods using cached order
+    for my $c (@$build_order) {
         no strict 'refs';
-        my $build = *{"${c}::BUILD"}{CODE};
-        use strict 'refs';
-        $build->($self, \%attrs) if $build;
+        if (my $build = *{"${c}::BUILD"}{CODE}) {
+            $build->($self, \%attrs);
+        }
     }
 
     return $self;
 }
 
+# Alternative: Exact recursive algorithm with caching
+sub new_exact_recursive {
+    my $class = shift;
+    my %attrs = @_;
+    my $self = bless { %attrs }, $class;
+
+    # Use cached BUILD order or calculate and cache it
+    my $build_order = $BUILD_ORDER_CACHE{$class} ||= do {
+        my %seen;
+        my @order;
+
+        # Exact copy of original algorithm
+        local *collect;
+        *collect = sub {
+            my ($cur) = @_;
+            return if $seen{$cur}++;
+            no strict 'refs';
+            collect($_) for @{"${cur}::ISA"};
+            use strict 'refs';
+            push @order, $cur;
+        };
+
+        collect($class);
+        \@order;
+    };
+
+    # Call BUILD methods using cached order
+    for my $c (@$build_order) {
+        no strict 'refs';
+        if (my $build = *{"${c}::BUILD"}{CODE}) {
+            $build->($self, \%attrs);
+        }
+    }
+
+    return $self;
+}
+
+# Clear cache when inheritance changes
 sub extends {
     my ($maybe_class, @maybe_parents) = @_;
     my $child_class = caller;
 
-    # Handle multiple parents: if called with one scalar, treat as one parent
+    # Clear cache for this class and any classes that might inherit from it
+    delete_build_cache($child_class);
+
     my @parents = @maybe_parents ? ($maybe_class, @maybe_parents) : ($maybe_class);
 
     for my $parent_class (@parents) {
@@ -420,7 +480,19 @@ sub extends {
         # Add parent
         no strict 'refs';
         push @{"${child_class}::ISA"}, $parent_class;
-        use strict 'refs';
+    }
+}
+
+# Helper to clear cache for a class and its descendants
+sub delete_build_cache {
+    my ($class) = @_;
+    delete $BUILD_ORDER_CACHE{$class};
+
+    # Also clear cache for any classes that might have this class in their inheritance
+    for my $cached_class (keys %BUILD_ORDER_CACHE) {
+        if (grep { $_ eq $class } @{mro::get_linear_isa($cached_class)}) {
+            delete $BUILD_ORDER_CACHE{$cached_class};
+        }
     }
 }
 
@@ -441,7 +513,7 @@ sub import {
 
     # Always install new and extends
     no strict 'refs';
-    *{"${caller}::new"}     = \&Class::new;
+    *{"${caller}::new"}     = \&Class::new_exact_recursive;
     *{"${caller}::extends"} = \&Class::extends;
     use strict 'refs';
 

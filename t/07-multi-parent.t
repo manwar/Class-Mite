@@ -6,31 +6,36 @@ use Test::More;
 use FindBin qw($Bin);
 use lib $Bin;
 
-# Step 1: Load parent packages
-use ParentDB;
-use ParentFile;
+require ParentDB;
+require ParentFile;
 
-# Step 2: Define the child package
-{
-    package MultiParentTest;
-    use Class;
+package MultiParentTest;
+use Class;
+extends qw/ParentDB ParentFile/;
 
-    # Add multiple parents
-    extends qw/ParentDB ParentFile/;
+our @build_log;
+sub BUILD { push @build_log, 'MultiParentTest' }
 
-    # Optional: convenience method
-    sub save {
-        my $self = shift;
-        return $self->to_db . $self->to_file;
-    }
-}
-
-# Step 3: Test
 package main;
+
 my $obj = MultiParentTest->new;
 
-ok($obj->can('to_db'),   'can access method from ParentDB');
+# Methods from both parents accessible
+ok($obj->can('to_db'), 'can access method from ParentDB');
 ok($obj->can('to_file'), 'can access method from ParentFile');
-is($obj->save, "DB saved\nFile saved\n", 'Methods from all parents accessible');
+is($obj->to_db . $obj->to_file, "DB saved\nFile saved\n", 'Methods from all parents accessible');
+
+# BUILD hook order according to C3 linearization (ancestor-first)
+my @linear = @{ mro::get_linear_isa('MultiParentTest') };
+my @expected_build_order = grep {
+    my $f;
+    {
+        no strict 'refs';
+        $f = *{"${_}::BUILD"}{CODE};
+    }
+    $f;
+} grep { $_ ne 'UNIVERSAL' } reverse @linear;
+
+is_deeply([@build_log], \@expected_build_order, 'BUILD hooks called in linearized order');
 
 done_testing;

@@ -280,24 +280,32 @@ sub new {
 
     my $self = bless { %attrs }, $class;
 
-    _call_all_builds($class, $self, \%attrs);
+    # Diamond-safe, parent-first BUILD calls
+    my %seen;
+    my @order;
+
+    # DFS to collect parents first
+    my $collect;
+    $collect = sub {
+        my ($cur) = @_;
+        return if $seen{$cur}++;
+        no strict 'refs';
+        $collect->($_) for @{"${cur}::ISA"};
+        use strict 'refs';
+        push @order, $cur;
+    };
+
+    $collect->($class);
+
+    # Call BUILD in parent-first order
+    for my $c (@order) {
+        no strict 'refs';
+        my $build = *{"${c}::BUILD"}{CODE};
+        use strict 'refs';
+        $build->($self, \%attrs) if $build;
+    }
 
     return $self;
-}
-
-sub _call_all_builds {
-    my ($class, $self, $attrs) = @_;
-
-    # Use Perl's method resolution order (linearized ISA)
-    my @linear_isa = @{ mro::get_linear_isa($class) };
-
-    no strict 'refs';
-    for my $pkg (@linear_isa) {
-        if (my $build_ref = *{"${pkg}::BUILD"}{CODE}) {
-            $build_ref->($self, $attrs);
-        }
-    }
-    use strict 'refs';
 }
 
 sub extends {

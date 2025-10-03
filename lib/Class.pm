@@ -87,11 +87,6 @@ Version 0.02
     use Class;
     with qw/Loggable/;
 
-    sub BUILD {
-        my ($self, $args) = @_;
-        $self->{name} = $args->{name};
-    }
-
     sub get_name { shift->{name} }
 
     package main;
@@ -102,6 +97,39 @@ Version 0.02
 
     print $admin->get_name;              # Alice
     print $admin->log("Admin created");  # [LOG] Admin created
+
+=head2 Class with Roles
+
+    package Loggable;
+    use Role;
+    requires qw/get_name/;
+
+    sub log {
+        my ($self, $msg) = @_;
+        return "[LOG] $msg\n";
+    }
+
+    package File;
+    use Role;
+    requires qw/save/;
+
+    package MyApp::Admin;
+    use Class;
+    with qw/Loggable File/;
+
+    sub get_name { shift->{name}     }
+
+    sub save     { shift->log(shift) }
+
+    package main;
+    use strict;
+    use warnings;
+
+    my $admin = MyApp::Admin->new(name => 'Alice');
+
+    print $admin->get_name;              # Alice
+    print $admin->log("Admin created");  # [LOG] Admin created
+    print $admin->save("Data saved");    # [LOG] Data saved
 
 =head1 DESCRIPTION
 

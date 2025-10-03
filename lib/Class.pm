@@ -1,7 +1,7 @@
 package Class;
 
-$Class::VERSION   = '0.02';
-$Class::AUTHORITY = 'cpan:MANWAR';
+$Class::VERSION    = '0.02';
+$Class::AUTHORITY  = 'cpan:MANWAR';
 
 =head1 NAME
 
@@ -19,8 +19,9 @@ Version 0.02
     sub get_id { shift->{id} }
 
     package MyApp::User;
-    use Class extends => 'MyApp::Base'; # <--- New 'extends' support!
-    with 'Loggable';                    # from Role.pm
+    use Class;
+    extends 'MyApp::Base';
+    with 'Loggable';
 
     sub get_name {
         my $self = shift;
@@ -104,7 +105,7 @@ When you C<use Class;> in a package, it automatically:
 
 =item * Ensures L<Role> is loaded
 
-=item * Exports the C<with> function into your class, allowing role consumption
+=item * Exports the C<with> and C<does> functions into your class, allowing role composition
 
 =back
 
@@ -124,7 +125,7 @@ Creates a new object and optionally calls C<BUILD>.
 
 =item * import
 
-Internal. Handles inheritance, ensures C<Role> is available and exports C<with> into the calling class.
+Internal. Handles inheritance, ensures C<Role> is available and exports C<with> and C<does> into the calling class.
 
 =back
 
@@ -140,7 +141,8 @@ The C<extends> key allows a class to inherit from a parent class using
 Perl's standard C<@ISA> mechanism.
 
     package ChildClass;
-    use Class extends => 'ParentClass';
+    use Class;
+    extends 'ParentClass';
     # ChildClass methods and attributes will override ParentClass's.
 
 =head1 EXAMPLES
@@ -218,6 +220,7 @@ sub extends {
     }
 
     # 2. Add the parent to the caller's @ISA array
+    # Temporarily disable strict 'refs' to safely modify the calling package's @ISA array.
     no strict 'refs';
     push @{"$caller_class\::ISA"}, $parent_class;
     use strict 'refs';
@@ -235,8 +238,16 @@ sub import {
     }
 
     # --- Step B: Alias Role functions ---
+    # Use direct glob assignment (*Package::symbol) to satisfy 'use strict'
+    # and correctly alias the subroutines from Role into Class for export.
     *Class::with = \&Role::with;
     *Class::does = \&Role::does;
+
+    no strict 'refs';
+    *{"${caller}::with"}    = \&Role::with;
+    *{"${caller}::does"}    = \&Role::does;
+    *{"${caller}::extends"} = \&Class::extends;
+    use strict 'refs';
 
     # --- Step C: Handle the old 'extends => Parent' hash syntax (for compatibility) ---
     if (@args) {

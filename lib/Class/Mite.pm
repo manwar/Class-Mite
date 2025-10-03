@@ -28,37 +28,34 @@ This distribution provides two separate, complementary modules:
 
 You use them together like this:
 
-    # 1. Define a Role
     package Loggable;
+
     use Role;
-    requires 'get_id';
-    sub log { my ($self, $message) = @_; print "LOG: " . $self->get_id() . ": $message\n" }
+    requires qw/id name/;
 
-    # 2. Define a Class
-    package User;
-
-    use Class; # Automatically gives you new() and exports Role's 'with'
-    with qw/Loggable/;
-
-    # Custom post-constructor logic
-    sub BUILD {
-        my ($self, $args) = @_;
-        $self->{created_at} = time;
+    sub log {
+        my ($self) = @_;
+        return "[" . $self->id . "]: " . $self->name;
     }
 
-    sub get_id { $_[0]->{id} } # Satisfies the role requirement
+    package User;
 
-    # 3. Usage
+    use Class;
+    with qw/Loggable/;
+
+    sub id   { shift->{id}   }
+    sub name { shift->{name} }
+
     package main;
 
-    my $user = User->new( id => 42, name => 'Alice' );
-    $user->log('User object created'); # Calls the role method
+    my $user = User->new(id => 1, name => 'Alice');
+    print $user->log, "\n";
 
 =head1 DESCRIPTION
 
 C<Class::Mite> bundles a very minimal, high-speed approach to object-oriented
 programming in Perl. It borrows best practices from systems like L<Moo> and L<Role::Tiny>
-while keeping external dependencies and boilerplate code to an absolute minimum.
+while keeping external dependencies and boilerplate code to an absolute nothing.
 
 =head1 MODULES IN THIS DISTRIBUTION
 

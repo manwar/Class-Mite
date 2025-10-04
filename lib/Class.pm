@@ -354,8 +354,8 @@ our @ISA    = qw(Exporter);
 
 use mro ();
 
-# Cache for BUILD method orders to avoid recalculating for every object
 my %BUILD_ORDER_CACHE;
+my %PARENT_LOADED_CACHE;
 
 sub new {
     my $class = shift;
@@ -445,12 +445,10 @@ sub new_exact_recursive {
     return $self;
 }
 
-# Clear cache when inheritance changes
 sub extends {
     my ($maybe_class, @maybe_parents) = @_;
     my $child_class = caller;
 
-    # Clear cache for this class and any classes that might inherit from it
     delete_build_cache($child_class);
 
     my @parents = @maybe_parents ? ($maybe_class, @maybe_parents) : ($maybe_class);
@@ -459,25 +457,28 @@ sub extends {
         die "Recursive inheritance detected: $child_class cannot extend itself"
             if $child_class eq $parent_class;
 
-        # Load parent if not yet compiled
-        my $parent_exists;
-        {
-            no strict 'refs';
-            $parent_exists = keys %{"${parent_class}::"};
+        # Use cached result if available
+        unless ($PARENT_LOADED_CACHE{$parent_class}) {
+            my $already_loaded = do {
+                no strict 'refs';
+                keys %{"${parent_class}::"} || $INC{"$parent_class.pm"}
+            };
+
+            unless ($already_loaded) {
+                (my $parent_file = "$parent_class.pm") =~ s{::}{/}g;
+                eval { require $parent_file };
+                die "Failed to load parent class '$parent_class' from '$parent_file': $@" if $@;
+            }
+
+            # Cache it, so next time we skip all checks
+            $PARENT_LOADED_CACHE{$parent_class} = 1;
         }
 
-        unless ($parent_exists || $INC{"$parent_class.pm"}) {
-            (my $parent_file = "$parent_class.pm") =~ s{::}{/}g;
-            eval { require $parent_file };
-            die "Failed to load parent class '$parent_class' from '$parent_file': $@" if $@;
-        }
-
-        # Avoid duplicate parents
+        # Avoid duplicate parents in @ISA
         use mro ();
         my @linear = @{ mro::get_linear_isa($child_class) };
         next if grep { $_ eq $parent_class } @linear;
 
-        # Add parent
         no strict 'refs';
         push @{"${child_class}::ISA"}, $parent_class;
     }

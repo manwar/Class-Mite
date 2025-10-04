@@ -30,5 +30,6 @@ t/05-extends-already-loaded.t
 t/06-inheritance.t
 t/07-multi-parent.t
 t/08-diamond-build.t
+t/09-parent-method-inheritance.t
 t/manifest.t
 t/pod.t

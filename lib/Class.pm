@@ -1,11 +1,11 @@
 package Class;
 
-$Class::VERSION    = '0.02';
-$Class::AUTHORITY  = 'cpan:MANWAR';
+$Class::VERSION   = '0.02';
+$Class::AUTHORITY = 'cpan:MANWAR';
 
 =head1 NAME
 
-Class - A lightweight constructor and BUILD hook system for Perl
+Class - Lightweight Perl object system with parent-first BUILD and optional roles
 
 =head1 VERSION
 
@@ -13,346 +13,77 @@ Version 0.02
 
 =head1 SYNOPSIS
 
-=head2 Class ONLY
+    use Class;
 
-    package MyApp::User;
+    # Simple class with attributes and BUILD
+    package Person;
     use Class;
 
     sub BUILD {
-        my ($self, $args)  = @_;
-        $self->{full_name} = join ' ', $args->{first}, $args->{last};
+        my ($self, $attrs) = @_;
+        $self->{full_name} = $attrs->{first} . ' ' . $attrs->{last};
     }
 
-    sub get_name { shift->{full_name} }
-    sub get_id   { shift->{id} }
-
-    package main;
-
-    use strict;
-    use warnings;
-
-    my $user = MyApp::User->new(
-        first => 'John',
-        last  => 'Doe',
-        id    => 42,
-    );
-
-    print $user->get_id;   # 42
-    print $user->get_name; # John Doe
-
-=head2 Class with Inheritance
-
-    package MyApp::Person;
+    package Employee;
     use Class;
+    extends 'Person';
 
     sub BUILD {
-        my ($self, $args)  = @_;
-        $self->{full_name} = join ' ', $args->{first}, $args->{last};
+        my ($self, $attrs) = @_;
+        $self->{employee_id} = $attrs->{id};
     }
 
-    sub get_name { shift->{full_name} }
+    # Create an object
+    my $emp = Employee->new(first => 'John', last => 'Doe', id => 123);
 
-    package MyApp::Employee;
+    print $emp->{full_name};   # John Doe
+    print $emp->{employee_id}; # 123
+
+    # Using roles if Role.pm is available
+    package Manager;
     use Class;
-    extends qw/MyApp::Person/;
-
-    sub get_id { shift->{id} }
-
-    package main;
-
-    use strict;
-    use warnings;
-
-    my $emp = MyApp::Employee->new(
-        first => 'John',
-        last  => 'Doe',
-        id    => 42
-    );
-
-    print $user->get_id;   # 42
-    print $user->get_name; # John Doe
-
-=head2 Class with Role
-
-    package Loggable;
-    use Role;
-    requires qw/get_name/;
-
-    sub log {
-        my ($self, $msg) = @_;
-        return "[LOG] $msg\n";
-    }
-
-    package MyApp::Admin;
-    use Class;
-    with qw/Loggable/;
-
-    sub get_name { shift->{name} }
-
-    package main;
-    use strict;
-    use warnings;
-
-    my $admin = MyApp::Admin->new(name => 'Alice');
-
-    print $admin->get_name;              # Alice
-    print $admin->log("Admin created");  # [LOG] Admin created
-
-=head2 Class with Roles
-
-    package Loggable;
-    use Role;
-    requires qw/get_name/;
-
-    sub log {
-        my ($self, $msg) = @_;
-        return "[LOG] $msg\n";
-    }
-
-    package File;
-    use Role;
-    requires qw/save/;
-
-    package MyApp::Admin;
-    use Class;
-    with qw/Loggable File/;
-
-    sub get_name { shift->{name}     }
-
-    sub save     { shift->log(shift) }
-
-    package main;
-    use strict;
-    use warnings;
-
-    my $admin = MyApp::Admin->new(name => 'Alice');
-
-    print $admin->get_name;              # Alice
-    print $admin->log("Admin created");  # [LOG] Admin created
-    print $admin->save("Data saved");    # [LOG] Data saved
+    with 'SomeRole';
+    my $mgr = Manager->new();
 
 =head1 DESCRIPTION
 
-C<Class> provides a minimal object system for Perl. It focuses on:
+Class provides a lightweight Perl object system with:
 
 =over 4
 
-=item * Object instantiation with C<new>
+=item * Parent-first constructor building via C<BUILD> methods.
 
-=item * Automatic execution of a C<BUILD> method if present
+=item * Simple inheritance via C<extends>.
 
-=item * Integration with L<Role> for role composition
+=item * Optional role consumption via C<with> and C<does> (if C<Role> module is available).
 
-=item * **Simple inheritance via the C<extends> key**
+=item * Automatic caching of BUILD order for efficient object creation.
 
 =back
 
-The goal is to provide the smallest possible framework for classes and
-roles without requiring large dependencies such as Moose or Moo.
+=head1 EXPORT
 
-=head1 CONSTRUCTOR
-
-=head2 new
-
-    my $object = MyClass->new(%attributes);
-
-Creates a new object, blesses a hash reference with the given attributes
-into the class, and then calls the optional C<BUILD> method.
-
-If a C<BUILD> method is defined in the class, it is invoked with the
-signature:
-
-    sub BUILD {
-        my ($self, $args) = @_;
-        ...
-    }
-
-where:
+The following functions are exported by default:
 
 =over 4
 
-=item * C<$self> is the newly created object (blessed hash).
+=item * C<extends>
 
-=item * C<$args> is a plain hash reference containing the constructor arguments.
+=item * C<with> (if Role.pm is available)
 
-=back
-
-This allows you to modify or validate the object immediately after creation,
-for example by normalizing attributes, calculating derived values, or
-cleaning up arguments.
-
-=head1 IMPORT HOOK
-
-When you C<use Class;> in a package, it automatically:
-
-=over 4
-
-=item * Sets up **inheritance** if the C<extends> key is provided.
-
-=item * Ensures L<Role> is loaded
-
-=item * Exports the C<with> and C<does> functions into your class, allowing role composition
+=item * C<does> (if Role.pm is available)
 
 =back
-
-This makes role-based composition seamless:
-
-    package MyApp::Thing;
-    use Class;
-    with 'SomeRole', 'OtherRole';
-
-=head1 METHODS
-
-=over 4
-
-=item * new
-
-Creates a new object and optionally calls C<BUILD>.
-
-=item * import
-
-Internal. Handles inheritance, ensures C<Role> is available and exports C<with> and C<does> into the calling class.
-
-=back
-
-=head1 INTEGRATION WITH Role
-
-C<Class> is designed to be used together with L<Role>. Classes that
-C<use Class;> can consume roles defined with L<Role>. The C<with>
-function is made available automatically.
-
-=head1 INHERITANCE
-
-The C<extends> key allows a class to inherit from a parent class using
-Perl's standard C<@ISA> mechanism.
-
-    package ChildClass;
-    use Class;
-    extends 'ParentClass';
-    # ChildClass methods and attributes will override ParentClass's.
-
-=head1 INHERITANCE AND MULTI-PARENT SUPPORT
-
-The C<extends> function now supports **multiple parents** in a single call:
-
-    package Backend;
-    use Class;
-    extends qw/Database File/;
-
-This sets up standard Perl C<@ISA> linearization. You can still call C<extends> multiple times:
-
-    extends 'AnotherParent';
-
-C<Class> automatically handles **diamond inheritance**, ensuring:
-
-=over 4
-
-=item * Parent classes are loaded in order.
-
-=item * C<BUILD> hooks are called **once per class**, even if multiple inheritance paths reach the same ancestor.
-
-=item * C<BUILD> hooks are called in **parent-first order**, consistent with Moo/Moose.
-
-=back
-
-Example:
-
-    package A;
-    use Class;
-    sub BUILD { push @build_log, 'A' }
-
-    package B;
-    use Class;
-    extends 'A';
-    sub BUILD { push @build_log, 'B' }
-
-    package C;
-    use Class;
-    extends 'A';
-    sub BUILD { push @build_log, 'C' }
-
-    package D;
-    use Class;
-    extends qw/B C/;
-    sub BUILD { push @build_log, 'D' }
-
-    package main;
-    use Class;
-
-    my @build_log;
-    my $obj = D->new;
-
-    # @build_log now contains: ('A','B','C','D')
-    # Each BUILD called exactly once, parent-first.
-
-=head1 NEW FEATURES
-
-=over 4
-
-=item * Multi-parent inheritance via C<extends qw/.../>.
-
-=item * Diamond-safe BUILD hook execution (parent-first, single invocation).
-
-=item * Optional C<extends => 'ParentClass'> syntax on C<use Class;>.
-
-=back
-
-=head1 DIAGNOSTICS
-
-=over 4
-
-=item * C<Recursive inheritance detected: Child cannot extend itself>
-
-Thrown if a class attempts to extend itself.
-
-=item * C<BUILD hooks called in wrong order or multiple times>
-
-Will fail tests if diamond-safe BUILD is violated. Use C<@ISA> and C<extends> as documented.
-
-=back
-
-=head1 EXAMPLES
-
-=head2 Basic Usage
-
-    package Point;
-    use Class;
-
-    sub BUILD {
-        my ($self, $args) = @_;
-        $self->{x} ||= 0;
-        $self->{y} ||= 0;
-    }
-
-    my $p = Point->new(x => 10, y => 20);
-    say $p->{x}; # 10
-    say $p->{y}; # 20
-
-=head2 With Inheritance
-
-    package BaseItem;
-    use Class;
-
-    sub get_type { 'item' }
-
-    package HeavyItem;
-    use Class extends => 'BaseItem';
-
-    sub get_type { 'heavy ' . shift->SUPER::get_type() }
-
-    my $item = HeavyItem->new;
-    say $item->get_type; # heavy item
 
 =cut
 
 use strict;
 use warnings;
-
 use Exporter;
+use mro ();
+
 our @EXPORT = qw(extends with does);
 our @ISA    = qw(Exporter);
-
-use mro ();
 
 my %BUILD_ORDER_CACHE;
 my %PARENT_LOADED_CACHE;
@@ -362,64 +93,10 @@ sub new {
     my %attrs = @_;
     my $self = bless { %attrs }, $class;
 
-    # Use cached BUILD order or calculate and cache it
+    # Determine BUILD order (parent-first)
     my $build_order = $BUILD_ORDER_CACHE{$class} ||= do {
         my %seen;
         my @order;
-
-        # Exact replication of original recursive DFS using iterative approach
-        my @stack = ([$class, 0]);  # [class, state] where state: 0=pre, 1=post
-
-        while (@stack) {
-            my ($cur, $state) = @{pop @stack};
-
-            if ($state) {
-                # Post-order: add to order after processing children
-                push @order, $cur;
-                next;
-            }
-
-            next if $seen{$cur}++;
-
-            # Push current node for post-order processing
-            push @stack, [$cur, 1];
-
-            # Push all parents in reverse order (to maintain original order)
-            no strict 'refs';
-            my @parents = @{"${cur}::ISA"};
-            use strict 'refs';
-
-            for (reverse @parents) {
-                push @stack, [$_, 0] unless $seen{$_};
-            }
-        }
-
-        \@order;
-    };
-
-    # Call BUILD methods using cached order
-    for my $c (@$build_order) {
-        no strict 'refs';
-        if (my $build = *{"${c}::BUILD"}{CODE}) {
-            $build->($self, \%attrs);
-        }
-    }
-
-    return $self;
-}
-
-# Alternative: Exact recursive algorithm with caching
-sub new_exact_recursive {
-    my $class = shift;
-    my %attrs = @_;
-    my $self = bless { %attrs }, $class;
-
-    # Use cached BUILD order or calculate and cache it
-    my $build_order = $BUILD_ORDER_CACHE{$class} ||= do {
-        my %seen;
-        my @order;
-
-        # Exact copy of original algorithm
         local *collect;
         *collect = sub {
             my ($cur) = @_;
@@ -429,12 +106,11 @@ sub new_exact_recursive {
             use strict 'refs';
             push @order, $cur;
         };
-
         collect($class);
         \@order;
     };
 
-    # Call BUILD methods using cached order
+    # Call BUILD in order
     for my $c (@$build_order) {
         no strict 'refs';
         if (my $build = *{"${c}::BUILD"}{CODE}) {
@@ -457,24 +133,24 @@ sub extends {
         die "Recursive inheritance detected: $child_class cannot extend itself"
             if $child_class eq $parent_class;
 
-        # Use cached result if available
-        unless ($PARENT_LOADED_CACHE{$parent_class}) {
-            my $already_loaded = do {
-                no strict 'refs';
-                keys %{"${parent_class}::"} || $INC{"$parent_class.pm"}
-            };
+        # load parent only once
+        next if $PARENT_LOADED_CACHE{$parent_class};
 
-            unless ($already_loaded) {
-                (my $parent_file = "$parent_class.pm") =~ s{::}{/}g;
-                eval { require $parent_file };
-                die "Failed to load parent class '$parent_class' from '$parent_file': $@" if $@;
-            }
-
-            # Cache it, so next time we skip all checks
-            $PARENT_LOADED_CACHE{$parent_class} = 1;
+        my $parent_exists;
+        {
+            no strict 'refs';
+            $parent_exists = keys %{"${parent_class}::"};
         }
 
-        # Avoid duplicate parents in @ISA
+        unless ($parent_exists || $INC{"$parent_class.pm"}) {
+            (my $parent_file = "$parent_class.pm") =~ s{::}{/}g;
+            eval { require $parent_file };
+            die "Failed to load parent class '$parent_class': $@" if $@;
+        }
+
+        $PARENT_LOADED_CACHE{$parent_class} = 1;
+
+        # Avoid duplicate in @ISA
         use mro ();
         my @linear = @{ mro::get_linear_isa($child_class) };
         next if grep { $_ eq $parent_class } @linear;
@@ -484,12 +160,9 @@ sub extends {
     }
 }
 
-# Helper to clear cache for a class and its descendants
 sub delete_build_cache {
     my ($class) = @_;
     delete $BUILD_ORDER_CACHE{$class};
-
-    # Also clear cache for any classes that might have this class in their inheritance
     for my $cached_class (keys %BUILD_ORDER_CACHE) {
         if (grep { $_ eq $class } @{mro::get_linear_isa($cached_class)}) {
             delete $BUILD_ORDER_CACHE{$cached_class};
@@ -501,7 +174,7 @@ sub import {
     my ($class, @args) = @_;
     my $caller = caller;
 
-    # Try loading Role.pm, but don't die if it doesn't exist
+    # Load Role.pm if exists
     eval { require Role };
     if (!$@) {
         *Class::with = \&Role::with;
@@ -514,59 +187,118 @@ sub import {
 
     # Always install new and extends
     no strict 'refs';
-    *{"${caller}::new"}     = \&Class::new_exact_recursive;
+    *{"${caller}::new"}     = \&Class::new;
     *{"${caller}::extends"} = \&Class::extends;
     use strict 'refs';
 
-    # optional extends => Parent syntax
+    # optional extends => Parent
     if (@args && @args == 2 && $args[0] eq 'extends') {
         $class->extends($args[1]);
     }
 }
 
-=head1 DIAGNOSTICS
+=head1 METHODS
+
+=head2 new
+
+    my $obj = Class->new(%attributes);
+
+Constructs a new object of the class, calling all C<BUILD> methods from parent classes in parent-first order. All attributes are passed to C<BUILD> as a hashref.
+
+=head2 extends
+
+    extends 'ParentClass';
+    extends 'Parent1', 'Parent2';
+
+Adds one or more parent classes to the calling class. Automatically loads the parent class if not already loaded and prevents recursive inheritance. Duplicate parents are ignored.
+
+=head1 IMPORT
+
+    use Class;
+    use Class 'extends' => 'Parent';
+
+When imported, Class automatically installs the following functions into the caller's namespace:
 
 =over 4
 
-=item * C<BUILD did not receive arguments!>
+=item * C<new> - constructor
 
-Your C<BUILD> method should always accept two arguments: the object
-and a hashref of constructor arguments.
+=item * C<extends> - inheritance helper
 
-=item * C<Cannot find or load 'Role.pm'>
-
-Ensure L<Role> is installed and available in C<@INC>.
-
-=item * C<Cannot load parent class 'ParentClass': ...>
-
-The class specified with C<extends => 'ParentClass'> could not be found
-or loaded from its corresponding C<.pm> file in C<@INC>.
+=item * C<with> and C<does> - if Role.pm is available
 
 =back
 
-=head1 LIMITATIONS
+Optionally, you can specify C<extends> in the import statement to immediately set a parent class:
+
+    use Class 'extends' => 'Parent';
+
+=head1 BUILD METHODS
+
+Classes can define a C<BUILD> method:
+
+    sub BUILD {
+        my ($self, $attrs) = @_;
+        # initialize object
+    }
+
+All BUILD methods in the inheritance chain are called in parent-first order, ensuring proper initialization.
+
+=head1 ROLES
+
+If a C<Role> module is available, you can consume roles via:
+
+    with 'RoleName';
+    does 'RoleName';
+
+This provides role-based composition for shared behavior.
+
+=head1 CACHING
+
+Class uses internal caches to optimize object construction:
 
 =over 4
 
-=item * Only hash-based objects are supported.
+=item * %BUILD_ORDER_CACHE - caches linearized parent-first build order.
 
-=item * No attribute declaration or type constraints.
-
-=item * No method modifiers (before/after/around).
-
-=item * **C<BUILD> methods are not inherited or chained.**
+=item * %PARENT_LOADED_CACHE - ensures parent classes are loaded only once.
 
 =back
 
-=head1 SEE ALSO
+Caches are automatically updated when C<extends> is called.
+
+=head1 ERROR HANDLING
 
 =over 4
 
-=item * L<Role> - Companion role composition system
+=item * Recursive inheritance is detected and throws an exception.
 
-=item * L<Moo>, L<Moose>, L<Role::Tiny> - Heavier or alternative object systems
+=item * Failure to load a parent class dies with a meaningful error.
 
 =back
+
+=head1 EXAMPLES
+
+    package Animal;
+    use Class;
+
+    sub BUILD {
+        my ($self, $attrs) = @_;
+        $self->{species} = $attrs->{species};
+    }
+
+    package Dog;
+    use Class;
+    extends 'Animal';
+
+    sub BUILD {
+        my ($self, $attrs) = @_;
+        $self->{breed} = $attrs->{breed};
+    }
+
+    my $dog = Dog->new(species => 'Canine', breed => 'Labrador');
+    print $dog->{species}; # Canine
+    print $dog->{breed};   # Labrador
 
 =head1 AUTHOR
 

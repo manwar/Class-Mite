@@ -1,5 +1,6 @@
 Changes
 lib/Class/Mite.pm
+lib/Class/More.pm
 lib/Class.pm
 lib/Role.pm
 LICENSE
@@ -31,5 +32,14 @@ t/06-inheritance.t
 t/07-multi-parent.t
 t/08-diamond-build.t
 t/09-parent-method-inheritance.t
+t/10-class-more-basic.t
+t/11-class-more-constructor.t
+t/12-class-more-attributes.t
+t/13-class-more-inheritance.t
+t/14-class-more-accessors.t
+t/15-class-more-comprehensive.t
+t/16-class-more-edge-cases.t
+t/17-class-more-role-integration.t
+t/18-class-more-with-role.t
 t/manifest.t
 t/pod.t

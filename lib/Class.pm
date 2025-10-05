@@ -86,6 +86,7 @@ our @EXPORT = qw(extends with does);
 our @ISA    = qw(Exporter);
 
 my %BUILD_ORDER_CACHE;
+my %BUILD_METHODS_CACHE;
 my %PARENT_LOADED_CACHE;
 
 sub new {
@@ -93,32 +94,63 @@ sub new {
     my %attrs = @_;
     my $self = bless { %attrs }, $class;
 
-    # Determine BUILD order (parent-first)
-    my $build_order = $BUILD_ORDER_CACHE{$class} ||= do {
-        my %seen;
-        my @order;
-        local *collect;
-        *collect = sub {
-            my ($cur) = @_;
-            return if $seen{$cur}++;
-            no strict 'refs';
-            collect($_) for @{"${cur}::ISA"};
-            use strict 'refs';
-            push @order, $cur;
-        };
-        collect($class);
-        \@order;
-    };
+    my $build_methods = $BUILD_METHODS_CACHE{$class} ||= _compute_build_methods($class);
+    $_->($self, \%attrs) for @$build_methods;
 
-    # Call BUILD in order
-    for my $c (@$build_order) {
+    return $self;
+}
+
+sub _compute_build_methods {
+    my $class = shift;
+
+    my %seen;
+    my @parent_first;
+    my @stack = ($class);
+
+    # Iterative DFS that ensures true parent-first order
+    while (@stack) {
+        my $current = pop @stack;
+
+        if ($seen{$current}) {
+            # If we've seen it but it's not in order yet, skip
+            next;
+        }
+
+        # Check if all parents are already processed or in order
         no strict 'refs';
-        if (my $build = *{"${c}::BUILD"}{CODE}) {
-            $build->($self, \%attrs);
+        my @parents = @{"${current}::ISA"};
+        my $all_parents_ready = 1;
+
+        foreach my $parent (@parents) {
+            if (!$seen{$parent}) {
+                $all_parents_ready = 0;
+                last;
+            }
+        }
+
+        if ($all_parents_ready) {
+            # All parents are processed, we can add this class
+            $seen{$current} = 1;
+            push @parent_first, $current;
+        } else {
+            # Push current back and push unprocessed parents
+            push @stack, $current;
+            foreach my $parent (reverse @parents) {
+                push @stack, $parent unless $seen{$parent};
+            }
         }
     }
 
-    return $self;
+    # Get BUILD methods in parent-first order
+    my @build_methods;
+    foreach my $c (@parent_first) {
+        no strict 'refs';
+        if (my $build = *{"${c}::BUILD"}{CODE}) {
+            push @build_methods, $build;
+        }
+    }
+
+    return \@build_methods;
 }
 
 sub extends {
@@ -129,35 +161,32 @@ sub extends {
 
     my @parents = @maybe_parents ? ($maybe_class, @maybe_parents) : ($maybe_class);
 
+    no strict 'refs';
+
     for my $parent_class (@parents) {
         die "Recursive inheritance detected: $child_class cannot extend itself"
             if $child_class eq $parent_class;
 
-        # load parent only once
-        next if $PARENT_LOADED_CACHE{$parent_class};
+        # Check if already in inheritance chain
+        my @current_isa = @{"${child_class}::ISA"};
+        next if grep { $_ eq $parent_class } @current_isa;
 
-        my $parent_exists;
-        {
-            no strict 'refs';
-            $parent_exists = keys %{"${parent_class}::"};
+        # Load parent if needed
+        unless ($PARENT_LOADED_CACHE{$parent_class}) {
+            my $parent_exists = keys %{"${parent_class}::"};
+            unless ($parent_exists || $INC{"$parent_class.pm"}) {
+                (my $parent_file = "$parent_class.pm") =~ s{::}{/}g;
+                eval { require $parent_file };
+                die "Failed to load parent class '$parent_class': $@" if $@;
+            }
+            $PARENT_LOADED_CACHE{$parent_class} = 1;
         }
 
-        unless ($parent_exists || $INC{"$parent_class.pm"}) {
-            (my $parent_file = "$parent_class.pm") =~ s{::}{/}g;
-            eval { require $parent_file };
-            die "Failed to load parent class '$parent_class': $@" if $@;
-        }
-
-        $PARENT_LOADED_CACHE{$parent_class} = 1;
-
-        # Avoid duplicate in @ISA
-        use mro ();
-        my @linear = @{ mro::get_linear_isa($child_class) };
-        next if grep { $_ eq $parent_class } @linear;
-
-        no strict 'refs';
         push @{"${child_class}::ISA"}, $parent_class;
     }
+
+    # Set C3 MRO after all parents are added
+    mro::set_mro($child_class, 'c3');
 }
 
 sub delete_build_cache {

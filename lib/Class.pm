@@ -167,26 +167,27 @@ sub extends {
         die "Recursive inheritance detected: $child_class cannot extend itself"
             if $child_class eq $parent_class;
 
-        # Check if already in inheritance chain
-        my @current_isa = @{"${child_class}::ISA"};
-        next if grep { $_ eq $parent_class } @current_isa;
+        # Link inheritance if not already linked
+        push @{"${child_class}::ISA"}, $parent_class
+            unless grep { $_ eq $parent_class } @{"${child_class}::ISA"};
 
-        # Load parent if needed
-        unless ($PARENT_LOADED_CACHE{$parent_class}) {
-            my $parent_exists = keys %{"${parent_class}::"};
-            unless ($parent_exists || $INC{"$parent_class.pm"}) {
-                (my $parent_file = "$parent_class.pm") =~ s{::}{/}g;
-                eval { require $parent_file };
-                die "Failed to load parent class '$parent_class': $@" if $@;
+        # --- Copy parent methods into child for performance ---
+        my $parent_symtab = \%{"${parent_class}::"};
+        for my $method (keys %$parent_symtab) {
+            next if $method =~ /^(?:BUILD|new|extends|with|does|import|AUTOLOAD|DESTROY|BEGIN|END)$/;
+            next if $method =~ /^_/;
+            next if $method eq 'ISA' || $method eq 'VERSION' || $method eq 'EXPORT' || $method eq 'AUTHORITY';
+            next if $method =~ /::$/;  # Skip nested packages
+
+            # Only copy if not already defined
+            if (!defined &{"${child_class}::${method}"} && defined &{"${parent_class}::${method}"}) {
+                *{"${child_class}::${method}"} = \&{"${parent_class}::${method}"};
             }
-            $PARENT_LOADED_CACHE{$parent_class} = 1;
         }
 
-        push @{"${child_class}::ISA"}, $parent_class;
+        # Set MRO to C3 for correct linearization
+        mro::set_mro($child_class, 'c3');
     }
-
-    # Set C3 MRO after all parents are added
-    mro::set_mro($child_class, 'c3');
 }
 
 sub delete_build_cache {

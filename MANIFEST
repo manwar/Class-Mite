@@ -41,5 +41,7 @@ t/15-class-more-comprehensive.t
 t/16-class-more-edge-cases.t
 t/17-class-more-role-integration.t
 t/18-class-more-with-role.t
+t/class_inheritance.t
+t/cross_file_inheritance.t
 t/manifest.t
 t/pod.t

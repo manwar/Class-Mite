@@ -204,6 +204,15 @@ sub import {
     my ($class, @args) = @_;
     my $caller = caller;
 
+    # Enable strict and warnings in the caller
+    {
+        no strict 'refs';
+        *{"${caller}::strict::import"}  = \&strict::import;
+        *{"${caller}::warnings::import"} = \&warnings::import;
+        strict->import;
+        warnings->import;
+    }
+
     # Load Role.pm if exists
     eval { require Role };
     if (!$@) {

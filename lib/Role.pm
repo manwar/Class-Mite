@@ -270,6 +270,15 @@ sub import {
         _setup_role_application($caller, @args);
     }
 
+    # Enable strict and warnings in the caller
+    {
+        no strict 'refs';
+        *{"${caller}::strict::import"}  = \&strict::import;
+        *{"${caller}::warnings::import"} = \&warnings::import;
+        strict->import;
+        warnings->import;
+    }
+
     _export_with($caller);
 }
 

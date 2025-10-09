@@ -202,6 +202,15 @@ sub import {
         no strict 'refs';
         *{"${caller}::extends"}->($args[1]);
     }
+
+    # Enable strict and warnings in the caller
+    {
+        no strict 'refs';
+        *{"${caller}::strict::import"}  = \&strict::import;
+        *{"${caller}::warnings::import"} = \&warnings::import;
+        strict->import;
+        warnings->import;
+    }
 }
 
 sub _merge_parent_attributes {

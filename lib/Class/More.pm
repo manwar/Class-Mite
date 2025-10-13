@@ -155,8 +155,14 @@ sub import {
             die "Recursive inheritance detected: $caller cannot extend itself"
                 if $caller eq $parent_class;
 
-            # load parent only once
-            next if $PARENT_LOADED_CACHE{$parent_class};
+            if ($PARENT_LOADED_CACHE{$parent_class}) {
+                # Parent is loaded, but we still need to set up inheritance
+                no strict 'refs';
+                push @{"${caller}::ISA"}, $parent_class;
+                _merge_parent_attributes($caller, $parent_class);
+                _install_parent_accessors($caller, $parent_class);
+                next;
+            }
 
             my $parent_exists;
             {
@@ -182,6 +188,9 @@ sub import {
 
             # Merge parent attributes into child
             _merge_parent_attributes($caller, $parent_class);
+
+            # Install parent class accessors in child class
+            _install_parent_accessors($caller, $parent_class);
         }
     };
 
@@ -283,6 +292,25 @@ sub _process_attributes {
         # Check if attribute is required but not provided (after defaults)
         if ($attr_spec->{required} && !exists $self->{$attr_name}) {
             die "Required attribute '$attr_name' not provided for class $class";
+        }
+    }
+}
+
+sub _install_parent_accessors {
+    my ($child_class, $parent_class) = @_;
+    my $parent_attrs = $ATTRIBUTES{$parent_class} || {};
+
+    no strict 'refs';
+    for my $attr_name (keys %$parent_attrs) {
+        # Install accessor in child class if it doesn't exist
+        if (!defined *{"${child_class}::${attr_name}"}{CODE}) {
+            *{"${child_class}::${attr_name}"} = sub {
+                my $self = shift;
+                if (@_) {
+                    $self->{$attr_name} = shift;
+                }
+                return $self->{$attr_name};
+            };
         }
     }
 }

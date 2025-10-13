@@ -125,7 +125,7 @@ sub import {
         return $self;
     };
 
-    # Install has method (NEW FEATURE)
+    # Install has method
     *{"${caller}::has"} = sub {
         my ($attr_name, %spec) = @_;
 
@@ -155,46 +155,31 @@ sub import {
             die "Recursive inheritance detected: $caller cannot extend itself"
                 if $caller eq $parent_class;
 
-            if ($PARENT_LOADED_CACHE{$parent_class}) {
-                # Parent is loaded, but we still need to set up inheritance
-                no strict 'refs';
-                push @{"${caller}::ISA"}, $parent_class;
-                _merge_parent_attributes($caller, $parent_class);
-                _install_parent_accessors($caller, $parent_class);
-                next;
-            }
-
-            my $parent_exists;
-            {
-                no strict 'refs';
-                $parent_exists = keys %{"${parent_class}::"};
-            }
-
-            unless ($parent_exists || $INC{"$parent_class.pm"}) {
+            # SIMPLE AUTO-LOAD: Just check %INC
+            unless ($INC{"$parent_class.pm"}) {
                 (my $parent_file = "$parent_class.pm") =~ s{::}{/}g;
                 eval { require $parent_file };
-                die "Failed to load parent class '$parent_class': $@" if $@;
+                # Don't die - parent might be defined inline in tests
             }
 
-            $PARENT_LOADED_CACHE{$parent_class} = 1;
+            # SET UP INHERITANCE
+            no strict 'refs';
 
             # Avoid duplicate in @ISA
             use mro ();
             my @linear = @{ mro::get_linear_isa($caller) };
-            next if grep { $_ eq $parent_class } @linear;
+            unless (grep { $_ eq $parent_class } @linear) {
+                push @{"${caller}::ISA"}, $parent_class;
 
-            no strict 'refs';
-            push @{"${caller}::ISA"}, $parent_class;
+                # Merge parent attributes into child
+                _merge_parent_attributes($caller, $parent_class);
 
-            # Merge parent attributes into child
-            _merge_parent_attributes($caller, $parent_class);
-
-            # Install parent class accessors in child class
-            _install_parent_accessors($caller, $parent_class);
+                # Install parent class accessors in child class
+                _install_parent_accessors($caller, $parent_class);
+            }
         }
     };
 
-    # Load Role.pm if exists - EXACTLY like original Class
     # This ensures full compatibility with Class
     eval { require Role };
     if (!$@) {

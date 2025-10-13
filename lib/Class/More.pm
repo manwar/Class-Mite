@@ -265,11 +265,6 @@ sub _process_attributes {
     for my $attr_name (@attr_names) {
         my $attr_spec = $class_attrs->{$attr_name};
 
-        # Check if attribute is required but not provided
-        if ($attr_spec->{required} && !exists $attrs->{$attr_name}) {
-            die "Required attribute '$attr_name' not provided for class $class";
-        }
-
         # Apply default if attribute not provided and default exists
         if (!exists $attrs->{$attr_name} && exists $attr_spec->{default}) {
             my $default = $attr_spec->{default};
@@ -278,6 +273,16 @@ sub _process_attributes {
             } else {
                 $self->{$attr_name} = $default;
             }
+        }
+    }
+
+    # Now check required attributes AFTER applying defaults
+    for my $attr_name (@attr_names) {
+        my $attr_spec = $class_attrs->{$attr_name};
+
+        # Check if attribute is required but not provided (after defaults)
+        if ($attr_spec->{required} && !exists $self->{$attr_name}) {
+            die "Required attribute '$attr_name' not provided for class $class";
         }
     }
 }

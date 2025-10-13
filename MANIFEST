@@ -1,6 +1,7 @@
 Changes
 lib/Class/Mite.pm
 lib/Class/More.pm
+lib/Class/Clone.pm
 lib/Class.pm
 lib/Role.pm
 LICENSE

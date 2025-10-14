@@ -1,6 +1,6 @@
 package Class::More;
 
-$Class::More::VERSION    = '0.02';
+$Class::More::VERSION    = '0.03';
 $Class::More::AUTHORITY  = 'cpan:MANWAR';
 
 =head1 NAME
@@ -9,7 +9,7 @@ Class::More - Extended Perl object system with parent-first BUILD, typed attribu
 
 =head1 VERSION
 
-Version 0.02
+Version 0.03
 
 =head1 SYNOPSIS
 
@@ -73,9 +73,6 @@ Class::More is an extended Perl object system that builds on L<Class>, providing
 use strict;
 use warnings;
 use mro ();
-
-our $VERSION   = '0.01';
-our $AUTHORITY = 'cpan:MANWAR';
 
 my %BUILD_ORDER_CACHE;
 my %PARENT_LOADED_CACHE;

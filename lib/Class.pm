@@ -1,6 +1,6 @@
 package Class;
 
-$Class::VERSION   = '0.02';
+$Class::VERSION   = '0.03';
 $Class::AUTHORITY = 'cpan:MANWAR';
 
 =head1 NAME
@@ -9,7 +9,7 @@ Class - Lightweight Perl object system with parent-first BUILD and optional role
 
 =head1 VERSION
 
-Version 0.02
+Version 0.03
 
 =head1 SYNOPSIS
 

@@ -1,5 +1,9 @@
 Revision history for Class::Mite
 
+0.03  2025-10-14
+      - Added Class::More support 'has'
+      - Added Class::Clone support native clone()
+
 0.02  2025-10-03
       - Added support for key 'extends' in Class.pm.
 

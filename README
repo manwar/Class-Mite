@@ -147,6 +147,8 @@ command.
 
     perldoc Role
     perldoc Class
+    perldoc Class::More
+    perldoc Class::Clone
 
 You can also look for information at:
 

@@ -3,8 +3,8 @@ package Class::Mite;
 use strict;
 use warnings;
 
-our $VERSION   = '0.02';
-our $AUTHORITY = 'cpan:MANWAR';
+$Class::Clone::VERSION    = '0.03';
+$Class::Clone::AUTHORITY  = 'cpan:MANWAR';
 
 =head1 NAME
 
@@ -12,7 +12,7 @@ Class::Mite - A minimal, integrated Class and Role system for Perl
 
 =head1 VERSION
 
-Version 0.02
+Version 0.03
 
 =head1 SYNOPSIS
 

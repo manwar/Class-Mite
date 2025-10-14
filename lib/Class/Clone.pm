@@ -1,5 +1,8 @@
 package Class::Clone;
 
+$Class::Clone::VERSION    = '0.03';
+$Class::Clone::AUTHORITY  = 'cpan:MANWAR';
+
 use strict;
 use warnings;
 
@@ -13,11 +16,10 @@ sub import {
     if (!defined &{"${caller}::clone"}) {
         *{"${caller}::clone"} = sub {
             my $self = shift;
-            my %attrs = (%$self, @_);  # Shallow copy + allow overrides
+            my %attrs = (%$self, @_);
             return ref($self)->new(%attrs);
         };
     }
-    # If clone already exists, we do nothing (no conflicts)
 }
 
 1;
@@ -27,6 +29,10 @@ __END__
 =head1 NAME
 
 Class::Clone - Add clone method to Class-based classes
+
+=head1 VERSION
+
+Version 0.03
 
 =head1 SYNOPSIS
 

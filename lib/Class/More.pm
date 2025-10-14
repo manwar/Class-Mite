@@ -86,81 +86,71 @@ sub import {
     no strict 'refs';
 
     # Install new methodi
+    *{"${caller}::new"} = sub {
+        my $class = shift;
+        my %attrs = @_;
+        my $self = bless { %attrs }, $class;
 
-# Install new method - FIXED VERSION
-*{"${caller}::new"} = sub {
-    my $class = shift;
-    my %attrs = @_;
-    my $self = bless { %attrs }, $class;
+        # CRITICAL: Process attributes with required and default
+        Class::More::_process_attributes($class, $self, \%attrs);
 
-    print "DEBUG: new called for $class\n" if $ENV{DEBUG_PROCESS};
-
-    # CRITICAL: Process attributes with required and default
-    print "DEBUG: Calling _process_attributes for $class\n" if $ENV{DEBUG_PROCESS};
-    Class::More::_process_attributes($class, $self, \%attrs);
-    print "DEBUG: After _process_attributes: " . join(', ', map { "$_=>$self->{$_}" } keys %$self) . "\n" if $ENV{DEBUG_PROCESS};
-
-    # Determine BUILD order (parent-first)
-    my $build_order = $BUILD_ORDER_CACHE{$class} ||= do {
-        my %seen;
-        my @order;
-        local *collect;
-        *collect = sub {
-            my ($cur) = @_;
-            return if $seen{$cur}++;
-            no strict 'refs';
-            collect($_) for @{"${cur}::ISA"};
-            use strict 'refs';
-            push @order, $cur;
+        # Determine BUILD order (parent-first)
+        my $build_order = $BUILD_ORDER_CACHE{$class} ||= do {
+            my %seen;
+            my @order;
+            local *collect;
+            *collect = sub {
+                my ($cur) = @_;
+                return if $seen{$cur}++;
+                no strict 'refs';
+                collect($_) for @{"${cur}::ISA"};
+                use strict 'refs';
+                push @order, $cur;
+            };
+            collect($class);
+            \@order;
         };
-        collect($class);
-        \@order;
-    };
 
-    print "DEBUG: BUILD order for $class: " . join(' -> ', @$build_order) . "\n" if $ENV{DEBUG_PROCESS};
-
-    # Call BUILD in order
-    for my $c (@$build_order) {
-        no strict 'refs';
-        if (my $build = *{"${c}::BUILD"}{CODE}) {
-            print "DEBUG: Calling BUILD for $c\n" if $ENV{DEBUG_PROCESS};
-            $build->($self, \%attrs);
+        # Call BUILD in order
+        for my $c (@$build_order) {
+            no strict 'refs';
+            if (my $build = *{"${c}::BUILD"}{CODE}) {
+                $build->($self, \%attrs);
+            }
         }
-    }
 
-    return $self;
-};
+        return $self;
+    };
 
 
     # Install has method
     *{"${caller}::has"} = sub {
-    my ($attr_name, %spec) = @_;
+        my ($attr_name, %spec) = @_;
+        my $current_class = caller;
 
-    # CRITICAL FIX: Get the actual class that called has()
-    my $current_class = caller;
+        # VALIDATION: Reject 'require' in favor of 'required'
+        if (exists $spec{require}) {
+            die "Invalid attribute option 'require' for '$attr_name' in $current_class. " .
+                "Use 'required => 1' instead.";
+        }
 
-    print "DEBUG: has called by $current_class for attribute $attr_name\n" if $ENV{DEBUG_HAS};
+        # Initialize the ATTRIBUTES hash for this class if it doesn't exist
+        $ATTRIBUTES{$current_class} = {} unless exists $ATTRIBUTES{$current_class};
 
-    # Initialize the ATTRIBUTES hash for this class if it doesn't exist
-    $ATTRIBUTES{$current_class} = {} unless exists $ATTRIBUTES{$current_class};
+        # Store the attribute specification
+        $ATTRIBUTES{$current_class}{$attr_name} = \%spec;
 
-    # Store the attribute specification
-    $ATTRIBUTES{$current_class}{$attr_name} = \%spec;
-
-    print "DEBUG: Stored $attr_name in $current_class, now has: " .
-          join(', ', keys %{$ATTRIBUTES{$current_class}}) . "\n" if $ENV{DEBUG_HAS};
-
-    # Generate accessor if not exists
-    if (!defined *{"${current_class}::${attr_name}"}{CODE}) {
-        *{"${current_class}::${attr_name}"} = sub {
-            my $self = shift;
-            if (@_) {
-                $self->{$attr_name} = shift;
-            }
-            return $self->{$attr_name};
-        };
-    }
-};
+        # Generate accessor if not exists
+        if (!defined *{"${current_class}::${attr_name}"}{CODE}) {
+            *{"${current_class}::${attr_name}"} = sub {
+                my $self = shift;
+                if (@_) {
+                    $self->{$attr_name} = shift;
+                }
+                return $self->{$attr_name};
+            };
+        }
+    };
 
     # Install extends method
     *{"${caller}::extends"} = sub {
@@ -226,7 +216,7 @@ sub import {
     }
 }
 
-# NEW: Get all attributes including role attributes
+# Get all attributes including role attributes
 sub _get_all_attributes {
     my ($class) = @_;
 
@@ -261,12 +251,9 @@ sub _get_all_attributes {
     return \%all_attrs;
 }
 
-# UPDATED: Process both class and role attributes
+# Process both class and role attributes
 sub _process_attributes {
     my ($class, $self, $attrs) = @_;
-
-    print "DEBUG _process_attributes for $class\n" if $ENV{DEBUG_PROCESS};
-    print "DEBUG Constructor args: " . join(', ', keys %$attrs) . "\n" if $ENV{DEBUG_PROCESS} && %$attrs;
 
     # Get all attributes for this class (including inherited ones and role attributes)
     my $class_attrs = _get_all_attributes($class);
@@ -274,20 +261,19 @@ sub _process_attributes {
     # Sort attribute names to make required checking deterministic
     my @attr_names = sort keys %$class_attrs;
 
-    print "DEBUG All attributes for $class: " . join(', ', @attr_names) . "\n" if $ENV{DEBUG_PROCESS};
-
-    # First pass: Apply defaults
+    # First pass: Validate attribute specifications and apply defaults
     for my $attr_name (@attr_names) {
         my $attr_spec = $class_attrs->{$attr_name};
 
-        print "DEBUG Processing $attr_name: required=" . ($attr_spec->{required}?1:0) .
-              ", default=" . ($attr_spec->{default} // 'UNDEF') .
-              ", in_constructor=" . (exists $attrs->{$attr_name}?1:0) . "\n" if $ENV{DEBUG_PROCESS};
+        # VALIDATION: Reject 'require' in favor of 'required'
+        if (exists $attr_spec->{require}) {
+            die "Invalid attribute option 'require' for '$attr_name' in $class. " .
+                "Use 'required => 1' instead.";
+        }
 
         # Apply default if attribute not provided in constructor
         if (!exists $attrs->{$attr_name} && exists $attr_spec->{default}) {
             my $default = $attr_spec->{default};
-            print "DEBUG Applying default to $attr_name: $default\n" if $ENV{DEBUG_PROCESS};
             if (ref $default eq 'CODE') {
                 $self->{$attr_name} = $default->($self, $attrs);
             } else {
@@ -297,21 +283,19 @@ sub _process_attributes {
         # If attribute was provided in constructor, use that value
         elsif (exists $attrs->{$attr_name}) {
             $self->{$attr_name} = $attrs->{$attr_name};
-            print "DEBUG Using constructor value for $attr_name: " . $attrs->{$attr_name} . "\n" if $ENV{DEBUG_PROCESS};
         }
     }
 
-    # Second pass: Check required attributes
+    # Second pass: Check required attributes (only 'required', not 'require')
     for my $attr_name (@attr_names) {
         my $attr_spec = $class_attrs->{$attr_name};
 
         # Check if attribute is required but not set (after defaults and constructor args)
+        # ONLY check 'required', explicitly ignore 'require'
         if ($attr_spec->{required} && !exists $self->{$attr_name}) {
             die "Required attribute '$attr_name' not provided for class $class";
         }
     }
-
-    print "DEBUG Final after _process_attributes: " . join(', ', map { "$_=>$self->{$_}" } keys %$self) . "\n" if $ENV{DEBUG_PROCESS};
 }
 
 sub _merge_parent_attributes {

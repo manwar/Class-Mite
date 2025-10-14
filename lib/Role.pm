@@ -16,7 +16,6 @@ Version 0.04
 use strict;
 use warnings;
 
-# Use 'our' to ensure package variables persist
 our %REQUIRED_METHODS;
 our %IS_ROLE;
 our %EXCLUDED_ROLES;
@@ -263,7 +262,7 @@ sub import {
     my $caller = caller;
     no strict 'refs';
 
-    # CRITICAL FIX: Always mark the package as a role when they use Role
+    # Always mark the package as a role when they use Role
     $IS_ROLE{$caller} = 1;
 
     if (@args == 0) {
@@ -563,7 +562,7 @@ sub _apply_role {
     push @{$APPLIED_ROLES{$class}}, $role;
 }
 
-# New method to apply role attributes to consuming class
+# Apply role attributes to consuming class
 sub _apply_role_attributes {
     my ($class, $role) = @_;
 

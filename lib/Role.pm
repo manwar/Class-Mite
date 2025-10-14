@@ -1,6 +1,6 @@
 package Role;
 
-$Role::VERSION   = '0.03';
+$Role::VERSION   = '0.04';
 $Role::AUTHORITY = 'cpan:MANWAR';
 
 =head1 NAME
@@ -9,18 +9,20 @@ Role - A lightweight role composition system for Perl
 
 =head1 VERSION
 
-Version 0.03
+Version 0.04
 
 =cut
 
 use strict;
 use warnings;
 
-my %REQUIRED_METHODS;
-my %IS_ROLE;
-my %EXCLUDED_ROLES;
-my %APPLIED_ROLES;
-my %METHOD_ALIASES;
+# Use 'our' to ensure package variables persist
+our %REQUIRED_METHODS;
+our %IS_ROLE;
+our %EXCLUDED_ROLES;
+our %APPLIED_ROLES;
+our %METHOD_ALIASES;
+our %ROLE_ATTRIBUTES;
 
 =head1 SYNOPSIS
 
@@ -261,12 +263,17 @@ sub import {
     my $caller = caller;
     no strict 'refs';
 
+    # CRITICAL FIX: Always mark the package as a role when they use Role
+    $IS_ROLE{$caller} = 1;
+
     if (@args == 0) {
-        $IS_ROLE{$caller} = 1;
+        # This is a role definition
         $REQUIRED_METHODS{$caller} = [];
         *{"${caller}::requires"} = \&requires;
         *{"${caller}::excludes"} = \&excludes;
+        *{"${caller}::has"} = \&_role_has;
     } else {
+        # This is role consumption
         _setup_role_application($caller, @args);
     }
 
@@ -290,11 +297,9 @@ sub _export_with {
 
 sub with {
     my (@roles) = @_;
-
     my $caller  = caller;
 
-    # NEW: Automatically ensure the consuming package inherits the 'Class' base.
-    # This provides the default new() method and the BUILD() hook.
+    # Automatically ensure the consuming package inherits the 'Class' base
     Role::_ensure_class_base($caller);
 
     # Process roles into a clean list of role names and a structure for aliases
@@ -303,41 +308,22 @@ sub with {
     # Store aliases for later use during composition
     $METHOD_ALIASES{$caller} = $aliases_by_role;
 
-    my $roles_str = join ', ', map { "'$_'" } @$clean_roles_ref;
-
-    my $init_code = qq{
-        package $caller;
-
-        # CRITICAL FIX: Using BEGIN to ensure composition runs before methods are called.
-        BEGIN { Role::_apply_roles('$caller', $roles_str); }
-        1;
-    };
-
-    eval $init_code or die "Failed to set up role application: $@";
+    # Apply roles immediately
+    _apply_roles_and_track($caller, $clean_roles_ref);
 }
 
 sub _setup_role_application {
     my ($caller, @roles) = @_;
 
-    # NEW: Automatically apply the 'Class' module's constructor logic
-    # if the class is consuming roles.
-    # This simulates 'use Class' when a class uses a role.
-    Role::_ensure_class_base($caller); # <--- NEW LINE
+    # Automatically apply the 'Class' module's constructor logic
+    Role::_ensure_class_base($caller);
 
     my ($clean_roles_ref, $aliases_by_role) = _process_role_arguments(@roles);
 
     $METHOD_ALIASES{$caller} = $aliases_by_role;
 
-    my $roles_str = join ', ', map { "'$_'" } @$clean_roles_ref;
-
-    my $init_code = qq{
-        package $caller;
-
-        # CRITICAL FIX: Using BEGIN to ensure composition runs before methods are called.
-        BEGIN { Role::_apply_roles('$caller', $roles_str); }
-        1;
-    };
-    eval $init_code or die "Failed to set up role application: $@";
+    # Apply roles immediately
+    _apply_roles_and_track($caller, $clean_roles_ref);
 }
 
 # Helper to automatically apply the Class base
@@ -348,8 +334,7 @@ sub _ensure_class_base {
     # inherits from 'Class'. This prevents accidental overwrites.
     return if $class->can('new');
 
-    # We must ensure 'Class' is loaded and recognized.
-    # We assume the user has a Class.pm file available.
+    # We must ensure 'Class' is loaded and recognized
     eval "require Class" unless defined $INC{'Class.pm'};
 
     eval {
@@ -402,6 +387,53 @@ sub excludes {
     push @{$EXCLUDED_ROLES{$caller}}, @excluded_roles;
 }
 
+# Role-specific has function - only available during role definition
+sub _role_has {
+    my ($attr_name, %spec) = @_;
+    my $caller = caller;
+
+    # Store attribute specification for the role
+    $ROLE_ATTRIBUTES{$caller}{$attr_name} = \%spec;
+
+    # Generate accessor method in the role (this gets composed into classes)
+    no strict 'refs';
+    *{"${caller}::${attr_name}"} = sub {
+        my $self = shift;
+        if (@_) {
+            $self->{$attr_name} = shift;
+        }
+        return $self->{$attr_name};
+    };
+}
+
+# Apply roles and track them properly
+sub _apply_roles_and_track {
+    my ($class, $roles_ref) = @_;
+
+    # Initialize applied roles array if needed
+    $APPLIED_ROLES{$class} = [] unless exists $APPLIED_ROLES{$class};
+
+    foreach my $role (@$roles_ref) {
+        # Skip if already applied
+        next if grep { $_ eq $role } @{$APPLIED_ROLES{$class}};
+
+        # Load the role if not already loaded and mark it as a role
+        unless ($IS_ROLE{$role}) {
+            eval "require $role";
+            # Mark it as a role even if we just loaded it
+            $IS_ROLE{$role} = 1;
+        }
+
+        # Apply the role
+        _apply_role($class, $role);
+
+        # Track the applied role
+        push @{$APPLIED_ROLES{$class}}, $role;
+    }
+
+    _add_does_method($class);
+}
+
 sub _apply_roles {
     my ($class, @roles) = @_;
 
@@ -436,6 +468,9 @@ sub _apply_role {
         }
     }
 
+    # Apply role attributes first (before method validation)
+    _apply_role_attributes($class, $role);
+
     # Validate required methods
     my @missing;
     my $required = $REQUIRED_METHODS{$role} || [];
@@ -453,12 +488,13 @@ sub _apply_role {
     # Get aliases for this role in this class
     my $aliases_for_role = $METHOD_ALIASES{$class}->{$role} || {};
 
-    # Detect alias conflicts (already in your design)
+    # Detect alias conflicts
     no strict 'refs';
     my $role_stash = \%{"${role}::"};
     my @conflicts;
     foreach my $name (keys %$role_stash) {
-        next if $name =~ /^(BEGIN|END|import|DESTROY|new|requires|excludes|IS_ROLE|with)$/;
+        # Skip special methods and 'has' function - it's not a composable method
+        next if $name =~ /^(BEGIN|END|import|DESTROY|new|requires|excludes|IS_ROLE|with|has)$/;
         next if $name eq 'does';
         my $glob = $role_stash->{$name};
         next unless defined *{$glob}{CODE};
@@ -491,7 +527,8 @@ sub _apply_role {
 
     # Apply the role methods (Moo::Role style conflict rules)
     foreach my $name (keys %$role_stash) {
-        next if $name =~ /^(BEGIN|END|import|DESTROY|new|requires|excludes|IS_ROLE|with)$/;
+        # Skip special methods and 'has' function - it's not a composable method
+        next if $name =~ /^(BEGIN|END|import|DESTROY|new|requires|excludes|IS_ROLE|with|has)$/;
         next if $name eq 'does';
         my $glob = $role_stash->{$name};
         next unless defined *{$glob}{CODE};
@@ -524,6 +561,38 @@ sub _apply_role {
     # Track applied roles
     $APPLIED_ROLES{$class} = [] unless exists $APPLIED_ROLES{$class};
     push @{$APPLIED_ROLES{$class}}, $role;
+}
+
+# New method to apply role attributes to consuming class
+sub _apply_role_attributes {
+    my ($class, $role) = @_;
+
+    my $role_attrs = $ROLE_ATTRIBUTES{$role} || {};
+
+    # Ensure Class::More is loaded for attribute processing
+    eval { require Class::More };
+    return if $@;  # Skip if Class::More not available
+
+    no strict 'refs';
+
+    foreach my $attr_name (keys %$role_attrs) {
+        my $attr_spec = $role_attrs->{$attr_name};
+
+        # Store attribute in class's attribute registry
+        $Class::More::ATTRIBUTES{$class} = {} unless exists $Class::More::ATTRIBUTES{$class};
+        $Class::More::ATTRIBUTES{$class}{$attr_name} = $attr_spec;
+
+        # Install accessor if not already exists
+        if (!defined *{"${class}::${attr_name}"}{CODE}) {
+            *{"${class}::${attr_name}"} = sub {
+                my $self = shift;
+                if (@_) {
+                    $self->{$attr_name} = shift;
+                }
+                return $self->{$attr_name};
+            };
+        }
+    }
 }
 
 sub _find_method_origin {

@@ -1,6 +1,6 @@
 package Class::More;
 
-$Class::More::VERSION    = '0.03';
+$Class::More::VERSION    = '0.04';
 $Class::More::AUTHORITY  = 'cpan:MANWAR';
 
 =head1 NAME
@@ -9,7 +9,7 @@ Class::More - Extended Perl object system with parent-first BUILD, typed attribu
 
 =head1 VERSION
 
-Version 0.03
+Version 0.04
 
 =head1 SYNOPSIS
 
@@ -76,7 +76,7 @@ use mro ();
 
 my %BUILD_ORDER_CACHE;
 my %PARENT_LOADED_CACHE;
-my %ATTRIBUTES;
+our %ATTRIBUTES;
 
 sub import {
     my ($class, @args) = @_;
@@ -85,60 +85,82 @@ sub import {
     # Install methods directly into caller's namespace
     no strict 'refs';
 
-    # Install new method
-    *{"${caller}::new"} = sub {
-        my $class = shift;
-        my %attrs = @_;
-        my $self = bless { %attrs }, $class;
+    # Install new methodi
 
-        # Process attributes with required and default
-        _process_attributes($class, $self, \%attrs);
+# Install new method - FIXED VERSION
+*{"${caller}::new"} = sub {
+    my $class = shift;
+    my %attrs = @_;
+    my $self = bless { %attrs }, $class;
 
-        # Determine BUILD order (parent-first)
-        my $build_order = $BUILD_ORDER_CACHE{$class} ||= do {
-            my %seen;
-            my @order;
-            local *collect;
-            *collect = sub {
-                my ($cur) = @_;
-                return if $seen{$cur}++;
-                no strict 'refs';
-                collect($_) for @{"${cur}::ISA"};
-                use strict 'refs';
-                push @order, $cur;
-            };
-            collect($class);
-            \@order;
-        };
+    print "DEBUG: new called for $class\n" if $ENV{DEBUG_PROCESS};
 
-        # Call BUILD in order
-        for my $c (@$build_order) {
+    # CRITICAL: Process attributes with required and default
+    print "DEBUG: Calling _process_attributes for $class\n" if $ENV{DEBUG_PROCESS};
+    Class::More::_process_attributes($class, $self, \%attrs);
+    print "DEBUG: After _process_attributes: " . join(', ', map { "$_=>$self->{$_}" } keys %$self) . "\n" if $ENV{DEBUG_PROCESS};
+
+    # Determine BUILD order (parent-first)
+    my $build_order = $BUILD_ORDER_CACHE{$class} ||= do {
+        my %seen;
+        my @order;
+        local *collect;
+        *collect = sub {
+            my ($cur) = @_;
+            return if $seen{$cur}++;
             no strict 'refs';
-            if (my $build = *{"${c}::BUILD"}{CODE}) {
-                $build->($self, \%attrs);
-            }
-        }
-
-        return $self;
+            collect($_) for @{"${cur}::ISA"};
+            use strict 'refs';
+            push @order, $cur;
+        };
+        collect($class);
+        \@order;
     };
+
+    print "DEBUG: BUILD order for $class: " . join(' -> ', @$build_order) . "\n" if $ENV{DEBUG_PROCESS};
+
+    # Call BUILD in order
+    for my $c (@$build_order) {
+        no strict 'refs';
+        if (my $build = *{"${c}::BUILD"}{CODE}) {
+            print "DEBUG: Calling BUILD for $c\n" if $ENV{DEBUG_PROCESS};
+            $build->($self, \%attrs);
+        }
+    }
+
+    return $self;
+};
+
 
     # Install has method
     *{"${caller}::has"} = sub {
-        my ($attr_name, %spec) = @_;
+    my ($attr_name, %spec) = @_;
 
-        $ATTRIBUTES{$caller}{$attr_name} = \%spec;
+    # CRITICAL FIX: Get the actual class that called has()
+    my $current_class = caller;
 
-        # Generate accessor if not exists
-        if (!defined *{"${caller}::${attr_name}"}{CODE}) {
-            *{"${caller}::${attr_name}"} = sub {
-                my $self = shift;
-                if (@_) {
-                    $self->{$attr_name} = shift;
-                }
-                return $self->{$attr_name};
-            };
-        }
-    };
+    print "DEBUG: has called by $current_class for attribute $attr_name\n" if $ENV{DEBUG_HAS};
+
+    # Initialize the ATTRIBUTES hash for this class if it doesn't exist
+    $ATTRIBUTES{$current_class} = {} unless exists $ATTRIBUTES{$current_class};
+
+    # Store the attribute specification
+    $ATTRIBUTES{$current_class}{$attr_name} = \%spec;
+
+    print "DEBUG: Stored $attr_name in $current_class, now has: " .
+          join(', ', keys %{$ATTRIBUTES{$current_class}}) . "\n" if $ENV{DEBUG_HAS};
+
+    # Generate accessor if not exists
+    if (!defined *{"${current_class}::${attr_name}"}{CODE}) {
+        *{"${current_class}::${attr_name}"} = sub {
+            my $self = shift;
+            if (@_) {
+                $self->{$attr_name} = shift;
+            }
+            return $self->{$attr_name};
+        };
+    }
+};
 
     # Install extends method
     *{"${caller}::extends"} = sub {
@@ -204,76 +226,125 @@ sub import {
     }
 }
 
-sub _merge_parent_attributes {
-    my ($child_class, $parent_class) = @_;
+# NEW: Get all attributes including role attributes
+sub _get_all_attributes {
+    my ($class) = @_;
 
-    # Get parent's attributes (including from its parents)
-    my %parent_attrs;
+    my %all_attrs;
 
-    # Walk through parent's MRO to collect all attributes
-    for my $class (@{mro::get_linear_isa($parent_class)}) {
-        if (my $class_attrs = $ATTRIBUTES{$class}) {
-            %parent_attrs = (%parent_attrs, %$class_attrs);
+    # Get Class::More attributes from inheritance chain
+    # Process from most specific to least specific (child overrides parent)
+    my @isa = @{mro::get_linear_isa($class)};
+
+    # Reverse to process child first, then parent (child overrides parent)
+    foreach my $current_class (reverse @isa) {
+        if (my $current_attrs = $ATTRIBUTES{$current_class}) {
+            # Child attributes override parent attributes
+            %all_attrs = (%all_attrs, %$current_attrs);
         }
     }
 
-    # Merge with child's attributes (child overrides parent)
-    if (%parent_attrs) {
-        $ATTRIBUTES{$child_class} = {
-            %parent_attrs,
-            %{$ATTRIBUTES{$child_class} || {}}
-        };
-
-        # Install accessors for inherited attributes that don't conflict with child methods
-        for my $attr_name (keys %parent_attrs) {
-            next if $ATTRIBUTES{$child_class}{$attr_name} &&
-                   $ATTRIBUTES{$child_class}{$attr_name} != $parent_attrs{$attr_name};
-
-            # Only install accessor if it doesn't already exist in child
-            no strict 'refs';
-            if (!defined *{"${child_class}::${attr_name}"}{CODE}) {
-                *{"${child_class}::${attr_name}"} = sub {
-                    my $self = shift;
-                    if (@_) {
-                        $self->{$attr_name} = shift;
+    # Get Role attributes (if Role is loaded) - roles should not override class attributes
+    if (exists $INC{'Role.pm'} && $Role::APPLIED_ROLES{$class}) {
+        foreach my $role (@{$Role::APPLIED_ROLES{$class}}) {
+            if (my $role_attrs = $Role::ROLE_ATTRIBUTES{$role}) {
+                # Role attributes are added but don't override class attributes
+                foreach my $attr_name (keys %$role_attrs) {
+                    if (!exists $all_attrs{$attr_name}) {
+                        $all_attrs{$attr_name} = $role_attrs->{$attr_name};
                     }
-                    return $self->{$attr_name};
-                };
+                }
             }
         }
     }
+
+    return \%all_attrs;
 }
 
+# UPDATED: Process both class and role attributes
 sub _process_attributes {
     my ($class, $self, $attrs) = @_;
 
-    # Get all attributes for this class (including inherited ones)
-    my $class_attrs = $ATTRIBUTES{$class} || {};
+    print "DEBUG _process_attributes for $class\n" if $ENV{DEBUG_PROCESS};
+    print "DEBUG Constructor args: " . join(', ', keys %$attrs) . "\n" if $ENV{DEBUG_PROCESS} && %$attrs;
+
+    # Get all attributes for this class (including inherited ones and role attributes)
+    my $class_attrs = _get_all_attributes($class);
 
     # Sort attribute names to make required checking deterministic
     my @attr_names = sort keys %$class_attrs;
 
+    print "DEBUG All attributes for $class: " . join(', ', @attr_names) . "\n" if $ENV{DEBUG_PROCESS};
+
+    # First pass: Apply defaults
     for my $attr_name (@attr_names) {
         my $attr_spec = $class_attrs->{$attr_name};
 
-        # Apply default if attribute not provided and default exists
+        print "DEBUG Processing $attr_name: required=" . ($attr_spec->{required}?1:0) .
+              ", default=" . ($attr_spec->{default} // 'UNDEF') .
+              ", in_constructor=" . (exists $attrs->{$attr_name}?1:0) . "\n" if $ENV{DEBUG_PROCESS};
+
+        # Apply default if attribute not provided in constructor
         if (!exists $attrs->{$attr_name} && exists $attr_spec->{default}) {
             my $default = $attr_spec->{default};
+            print "DEBUG Applying default to $attr_name: $default\n" if $ENV{DEBUG_PROCESS};
             if (ref $default eq 'CODE') {
                 $self->{$attr_name} = $default->($self, $attrs);
             } else {
                 $self->{$attr_name} = $default;
             }
         }
+        # If attribute was provided in constructor, use that value
+        elsif (exists $attrs->{$attr_name}) {
+            $self->{$attr_name} = $attrs->{$attr_name};
+            print "DEBUG Using constructor value for $attr_name: " . $attrs->{$attr_name} . "\n" if $ENV{DEBUG_PROCESS};
+        }
     }
 
-    # Now check required attributes AFTER applying defaults
+    # Second pass: Check required attributes
     for my $attr_name (@attr_names) {
         my $attr_spec = $class_attrs->{$attr_name};
 
-        # Check if attribute is required but not provided (after defaults)
+        # Check if attribute is required but not set (after defaults and constructor args)
         if ($attr_spec->{required} && !exists $self->{$attr_name}) {
             die "Required attribute '$attr_name' not provided for class $class";
+        }
+    }
+
+    print "DEBUG Final after _process_attributes: " . join(', ', map { "$_=>$self->{$_}" } keys %$self) . "\n" if $ENV{DEBUG_PROCESS};
+}
+
+sub _merge_parent_attributes {
+    my ($child_class, $parent_class) = @_;
+
+    # Start with child's existing attributes
+    my %merged_attrs = %{$ATTRIBUTES{$child_class} || {}};
+
+    # Walk through all parent classes in inheritance order
+    my @parent_classes = @{mro::get_linear_isa($parent_class)};
+
+    # Process from most specific to least specific (reverse order)
+    foreach my $parent_class (reverse @parent_classes) {
+        if (my $parent_attrs = $ATTRIBUTES{$parent_class}) {
+            # Parent attributes are merged in, but child attributes take precedence
+            %merged_attrs = (%$parent_attrs, %merged_attrs);
+        }
+    }
+
+    # Update the child's attributes with the merged result
+    $ATTRIBUTES{$child_class} = \%merged_attrs;
+
+    # Install accessors for all attributes
+    for my $attr_name (keys %merged_attrs) {
+        no strict 'refs';
+        if (!defined *{"${child_class}::${attr_name}"}{CODE}) {
+            *{"${child_class}::${attr_name}"} = sub {
+                my $self = shift;
+                if (@_) {
+                    $self->{$attr_name} = shift;
+                }
+                return $self->{$attr_name};
+            };
         }
     }
 }

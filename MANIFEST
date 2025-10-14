@@ -44,6 +44,9 @@ t/17-class-more-role-integration.t
 t/18-class-more-with-role.t
 t/19-class-more-required-with-default.t
 t/20-class-more-inherited-accessor.t
+t/21-role-with-attributes.t
+t/22-moo-style-roles.t
+t/23-class-more-inheritance-attr.t
 t/class_inheritance.t
 t/cross_file_inheritance.t
 t/manifest.t

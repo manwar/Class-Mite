@@ -1,11 +1,10 @@
 package Class::More;
 
-$Class::More::VERSION    = '0.04';
+$Class::More::VERSION    = '0.05';
 $Class::More::AUTHORITY  = 'cpan:MANWAR';
 
 use strict;
 use warnings;
-use mro ();
 
 # Performance optimization caches
 my %BUILD_ORDER_CACHE;
@@ -13,36 +12,29 @@ my %PARENT_LOADED_CACHE;
 my %ALL_ATTRIBUTES_CACHE;
 our %ATTRIBUTES;
 
-# Pre-generate common accessor for maximum performance
-my $SIMPLE_ACCESSOR = sub {
-    my ($attr_name) = @_;
-    return sub {
-        my $self = shift;
-        if (@_) {
-            $self->{$attr_name} = shift;
-        }
-        return $self->{$attr_name};
-    };
-};
+# Ultra-fast accessor cache
+my %ACCESSOR_CACHE;
 
-# Precompute skip patterns for faster inheritance
-my %INHERITANCE_SKIP = map { $_ => 1 } qw(
-    Class Class::More UNIVERSAL
-);
+sub _generate_fast_accessor {
+    my ($attr_name) = @_;
+
+    return $ACCESSOR_CACHE{$attr_name} ||= sub {
+        $_[0]{$attr_name} = $_[1] if @_ > 1;
+        return $_[0]{$attr_name};
+    };
+}
 
 sub import {
     my ($class, @args) = @_;
     my $caller = caller;
 
-    # Enable strict and warnings first
     strict->import;
     warnings->import;
 
-    # Install methods directly into caller's namespace
     no strict 'refs';
 
     # Install optimized new method
-    *{"${caller}::new"} = _generate_new_method($caller);
+    *{"${caller}::new"} = _generate_optimized_constructor($caller);
 
     # Install has method
     *{"${caller}::has"} = \&_has;
@@ -57,137 +49,132 @@ sub import {
         *{"${caller}::does"} = \&Role::does;
     }
 
-    # Handle extends in import if specified
     if (@args && $args[0] eq 'extends') {
         _extends($caller, @args[1..$#args]);
     }
 }
 
-# Generate highly optimized new method
-sub _generate_new_method {
+# Generate highly optimized constructor
+sub _generate_optimized_constructor {
     my $class = shift;
 
     return sub {
         my $class = shift;
-        my %attrs = @_;
-        my $self = bless { %attrs }, $class;
+        my %args = @_;
 
-        # OPTIMIZATION: Fast path for classes with no attributes
+        # Fast path: bless hashref directly for maximum speed
+        my $self = bless {}, $class;
+
+        # Get cached attributes
         my $class_attrs = _get_all_attributes_fast($class);
-        if (%$class_attrs) {
-            _process_attributes_fast($class, $self, \%attrs, $class_attrs);
+
+        # Ultra-fast path: no attributes, no BUILD methods
+        unless (%$class_attrs) {
+            my $build_methods = $BUILD_ORDER_CACHE{$class} ||= _compute_build_methods_fast($class);
+            unless (@$build_methods) {
+                # Absolute fastest path: just copy args and return
+                %$self = %args;
+                return $self;
+            }
         }
 
-        # Get cached BUILD methods
+        # Make args copy for defaults
+        my %args_copy = %args;
+
+        # Process attributes efficiently
+        _process_attributes_ultra_fast($class, $self, \%args, \%args_copy, $class_attrs);
+
+        # Copy remaining args
+        while (my ($key, $value) = each %args) {
+            $self->{$key} = $value unless exists $self->{$key};
+        }
+
+        # Call BUILD methods if any
         my $build_methods = $BUILD_ORDER_CACHE{$class} ||= _compute_build_methods_fast($class);
-        $_->($self, \%attrs) for @$build_methods;
+        if (@$build_methods) {
+            $_->($self, \%args_copy) for @$build_methods;
+        }
 
         return $self;
     };
 }
 
-# Optimized attribute processing
-sub _process_attributes_fast {
-    my ($class, $self, $attrs, $class_attrs) = @_;
+# Ultra-fast attribute processing
+sub _process_attributes_ultra_fast {
+    my ($class, $self, $args, $args_copy, $class_attrs) = @_;
 
-    # First pass: handle constructor values and defaults
+    my @required_check;
+
+    # PASS 1: Constructor values with minimal operations
     foreach my $attr_name (keys %$class_attrs) {
-        my $attr_spec = $class_attrs->{$attr_name};
+        my $spec = $class_attrs->{$attr_name};
 
-        # Check if attribute was provided in constructor
-        if (exists $attrs->{$attr_name}) {
-            # Use constructor value
-            $self->{$attr_name} = $attrs->{$attr_name};
-        } elsif (exists $attr_spec->{default}) {
-            # Apply default if not provided
-            my $default = $attr_spec->{default};
-            $self->{$attr_name} = ref $default eq 'CODE' ? $default->($self, $attrs) : $default;
+        if (exists $args->{$attr_name}) {
+            $self->{$attr_name} = $args->{$attr_name};
+            delete $args->{$attr_name};
+            next;
         }
-        # If neither provided nor has default, leave undef
+
+        push @required_check, $attr_name if $spec->{required};
     }
 
-    # Second pass: check required attributes
+    # PASS 2: Defaults
     foreach my $attr_name (keys %$class_attrs) {
-        my $attr_spec = $class_attrs->{$attr_name};
-        if ($attr_spec->{required} && !exists $self->{$attr_name}) {
-            die "Required attribute '$attr_name' not provided for class $class";
+        next if exists $self->{$attr_name};
+
+        my $spec = $class_attrs->{$attr_name};
+        if (exists $spec->{default}) {
+            my $default = $spec->{default};
+            $self->{$attr_name} = ref $default eq 'CODE'
+                ? $default->($self, $args_copy)
+                : $default;
+        }
+    }
+
+    # PASS 3: Required attributes (only if any exist)
+    if (@required_check) {
+        foreach my $attr_name (@required_check) {
+            unless (defined $self->{$attr_name}) {
+                die "Required attribute '$attr_name' not provided for class $class";
+            }
         }
     }
 }
 
-# Fast attribute resolution with minimal MRO usage
+# Fast attribute resolution
 sub _get_all_attributes_fast {
     my ($class) = @_;
 
-    # Check cache first
     return $ALL_ATTRIBUTES_CACHE{$class} if exists $ALL_ATTRIBUTES_CACHE{$class};
 
     my %all_attrs;
 
-    # OPTIMIZATION: Direct inheritance scan instead of full MRO when possible
-    no strict 'refs';
-    my @isa = @{"${class}::ISA"};
-
-    # Process current class first
+    # Current class
     if (my $current_attrs = $ATTRIBUTES{$class}) {
         %all_attrs = %$current_attrs;
     }
 
-    # Process parents (child attributes already override parent ones)
+    # Parents
+    no strict 'refs';
+    my @isa = @{"${class}::ISA"};
     foreach my $parent (@isa) {
-        next if $INHERITANCE_SKIP{$parent};
+        next if $parent eq 'Class::More' || $parent eq 'UNIVERSAL';
         if (my $parent_attrs = $ATTRIBUTES{$parent}) {
             %all_attrs = (%$parent_attrs, %all_attrs);
         }
     }
 
-    # Cache the result
     return $ALL_ATTRIBUTES_CACHE{$class} = \%all_attrs;
 }
 
 # Optimized BUILD method computation
 sub _compute_build_methods_fast {
-    my $class = shift;
+    my ($class) = @_;
 
-    my @build_order;
-    my %visited;
-    my @stack = ($class);
-
-    # Iterative DFS for better performance than recursion
-    while (@stack) {
-        my $current = pop @stack;
-
-        if ($visited{$current}) {
-            next;
-        }
-
-        no strict 'refs';
-        my @parents = @{"${current}::ISA"};
-        my $all_parents_ready = 1;
-
-        # Check if all parents are processed
-        foreach my $parent (@parents) {
-            if (!$visited{$parent}) {
-                $all_parents_ready = 0;
-                last;
-            }
-        }
-
-        if ($all_parents_ready) {
-            $visited{$current} = 1;
-            push @build_order, $current;
-        } else {
-            # Push current back and push unprocessed parents
-            push @stack, $current;
-            foreach my $parent (reverse @parents) {
-                push @stack, $parent unless $visited{$parent};
-            }
-        }
-    }
-
-    # Extract BUILD methods in order
+    my @inheritance_tree = _get_inheritance_tree_dfs($class);
     my @build_methods;
-    foreach my $c (@build_order) {
+
+    foreach my $c (@inheritance_tree) {
         no strict 'refs';
         if (defined &{"${c}::BUILD"}) {
             push @build_methods, \&{"${c}::BUILD"};
@@ -197,32 +184,44 @@ sub _compute_build_methods_fast {
     return \@build_methods;
 }
 
+# Efficient DFS
+sub _get_inheritance_tree_dfs {
+    my ($class, $visited) = @_;
+    $visited ||= {};
+
+    return () if $visited->{$class} || !defined $class;
+    $visited->{$class} = 1;
+
+    my @order;
+
+    no strict 'refs';
+    my @isa = @{"${class}::ISA"};
+
+    foreach my $parent (@isa) {
+        next if !defined $parent || $parent eq 'Class::More' || $parent eq 'UNIVERSAL' || $parent eq '';
+        push @order, _get_inheritance_tree_dfs($parent, $visited);
+    }
+
+    push @order, $class;
+    return @order;
+}
+
 # Optimized has method
 sub _has {
     my ($attr_name, %spec) = @_;
     my $current_class = caller;
 
-    # Validate attribute options
-    if (exists $spec{require}) {
-        die "Invalid attribute option 'require' for '$attr_name' in $current_class. " .
-            "Use 'required => 1' instead.";
-    }
-
-    # Clear attributes cache
     _clear_attributes_cache($current_class);
 
-    # Store attribute specification
     $ATTRIBUTES{$current_class} = {} unless exists $ATTRIBUTES{$current_class};
     $ATTRIBUTES{$current_class}{$attr_name} = \%spec;
 
-    # Install accessor if not exists - use pre-generated accessor
     no strict 'refs';
     if (!defined &{"${current_class}::${attr_name}"}) {
-        *{"${current_class}::${attr_name}"} = $SIMPLE_ACCESSOR->($attr_name);
+        *{"${current_class}::${attr_name}"} = _generate_fast_accessor($attr_name);
     }
 }
 
-# Optimized extends method
 sub _extends {
     my $caller = caller;
     my @parents = @_;
@@ -234,63 +233,19 @@ sub _extends {
         die "Recursive inheritance detected: $caller cannot extend itself"
             if $caller eq $parent_class;
 
-        # Efficient parent loading with cache
         unless ($PARENT_LOADED_CACHE{$parent_class}) {
-            unless ($INC{"$parent_class.pm"}) {
-                (my $parent_file = "$parent_class.pm") =~ s{::}{/}g;
+            my $parent_file = "$parent_class.pm";
+            $parent_file =~ s{::}{/}g;
+
+            unless ($INC{$parent_file}) {
                 eval { require $parent_file };
             }
             $PARENT_LOADED_CACHE{$parent_class} = 1;
         }
 
-        # Set up inheritance
         no strict 'refs';
         unless (grep { $_ eq $parent_class } @{"${caller}::ISA"}) {
             push @{"${caller}::ISA"}, $parent_class;
-
-            # Merge parent attributes
-            _merge_parent_attributes_fast($caller, $parent_class);
-        }
-    }
-}
-
-# Fast parent attribute merging
-sub _merge_parent_attributes_fast {
-    my ($child_class, $parent_class) = @_;
-
-    # Clear cache for child class
-    _clear_attributes_cache($child_class);
-
-    # Start with child's existing attributes
-    my %merged_attrs = %{$ATTRIBUTES{$child_class} || {}};
-
-    # Get all parent classes efficiently
-    no strict 'refs';
-    my @parent_classes = ($parent_class, @{"${parent_class}::ISA"});
-
-    # Merge attributes from all parent classes
-    foreach my $parent (@parent_classes) {
-        next if $INHERITANCE_SKIP{$parent};
-        if (my $parent_attrs = $ATTRIBUTES{$parent}) {
-            %merged_attrs = (%$parent_attrs, %merged_attrs);
-        }
-    }
-
-    # Update child's attributes
-    $ATTRIBUTES{$child_class} = \%merged_attrs;
-
-    # Install accessors for merged attributes
-    _install_accessors_batch($child_class, \%merged_attrs);
-}
-
-# Batch install accessors for better performance
-sub _install_accessors_batch {
-    my ($class, $attrs) = @_;
-
-    no strict 'refs';
-    while (my ($attr_name, $spec) = each %$attrs) {
-        if (!defined &{"${class}::${attr_name}"}) {
-            *{"${class}::${attr_name}"} = $SIMPLE_ACCESSOR->($attr_name);
         }
     }
 }
@@ -298,8 +253,6 @@ sub _install_accessors_batch {
 sub _delete_build_cache {
     my ($class) = @_;
     delete $BUILD_ORDER_CACHE{$class};
-
-    # Only clear caches for classes that actually inherit from this class
     for my $cached_class (keys %BUILD_ORDER_CACHE) {
         if (_inherits_from_fast($cached_class, $class)) {
             delete $BUILD_ORDER_CACHE{$cached_class};
@@ -307,28 +260,20 @@ sub _delete_build_cache {
     }
 }
 
-# Fast inheritance check
 sub _inherits_from_fast {
     my ($class, $parent) = @_;
-
     no strict 'refs';
     my @isa = @{"${class}::ISA"};
-
     return 1 if grep { $_ eq $parent } @isa;
-
     foreach my $direct_parent (@isa) {
         return 1 if _inherits_from_fast($direct_parent, $parent);
     }
-
     return 0;
 }
 
-# Clear attributes cache for a class and its descendants
 sub _clear_attributes_cache {
     my ($class) = @_;
     delete $ALL_ATTRIBUTES_CACHE{$class};
-
-    # Clear cache for descendant classes
     for my $cached_class (keys %ALL_ATTRIBUTES_CACHE) {
         if (_inherits_from_fast($cached_class, $class)) {
             delete $ALL_ATTRIBUTES_CACHE{$cached_class};
@@ -336,7 +281,6 @@ sub _clear_attributes_cache {
     }
 }
 
-# For Role.pm to detect attribute capability
 sub can_handle_attributes { 1 }
 
 sub meta {
@@ -345,6 +289,16 @@ sub meta {
         can_handle_attributes => 1,
         attributes => $ATTRIBUTES{$class} || {},
     };
+}
+
+sub get_all_attributes {
+    my ($class) = @_;
+    return _get_all_attributes_fast($class);
+}
+
+sub _get_all_attributes {
+    my ($class) = @_;
+    return _get_all_attributes_fast($class);
 }
 
 =head1 NAME

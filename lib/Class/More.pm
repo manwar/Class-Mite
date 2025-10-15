@@ -85,6 +85,11 @@ sub import {
     # Install methods directly into caller's namespace
     no strict 'refs';
 
+    # Install can_handle_attributes method in the consuming class
+    no strict 'refs';
+    *{"${caller}::can_handle_attributes"} = sub { 1 }
+        unless $caller->can('can_handle_attributes');
+
     # Install new methodi
     *{"${caller}::new"} = sub {
         my $class = shift;
@@ -360,6 +365,18 @@ sub _delete_build_cache {
             delete $BUILD_ORDER_CACHE{$cached_class};
         }
     }
+}
+
+# For Role.pm to detect attribute capability
+sub can_handle_attributes { 1 }
+
+sub meta {
+    my $class = shift;
+    return {
+        can_handle_attributes => 1,
+        attributes => $ATTRIBUTES{$class} || {},
+        # Add other meta information as needed
+    };
 }
 
 =head1 EXPORT

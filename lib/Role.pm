@@ -257,6 +257,29 @@ Also available as C<UNIVERSAL::does($obj, 'RoleName')>.
 
 =cut
 
+sub _class_can_handle_attributes {
+    my ($class) = @_;
+
+    # Primary check: does the class have the can_handle_attributes method and does it return true?
+    if ($class->can('can_handle_attributes')) {
+        $class->can_handle_attributes ? 1 : 0;
+    }
+
+    # Secondary check: does the class have Class::More methods?
+    if ($class->can('has') && $class->can('extends') && $class->can('with')) {
+        return 1;
+    }
+
+    # Tertiary check: is Class::More in the inheritance chain?
+    no strict 'refs';
+    my @isa = @{"${class}::ISA"};
+    if (grep { $_ eq 'Class::More' } @isa) {
+        return 1;
+    }
+
+    return 0;
+}
+
 sub import {
     my ($class, @args) = @_;
     my $caller = caller;
@@ -467,7 +490,21 @@ sub _apply_role {
         }
     }
 
-    # Apply role attributes first (before method validation)
+    # Check if class can handle role attributes
+    my $can_handle_attributes = _class_can_handle_attributes($class);
+
+    # Check if role has attributes
+    my $role_has_attrs = $ROLE_ATTRIBUTES{$role} && keys %{$ROLE_ATTRIBUTES{$role}};
+
+    # Warn if role has attributes but class can't handle them
+    if (!$can_handle_attributes && $role_has_attrs) {
+        my @role_attrs = keys %{$ROLE_ATTRIBUTES{$role}};
+        warn "ROLE WARNING: Role '$role' has attributes (@role_attrs) that will be ignored\n"
+            . "              because class '$class' uses Class.pm (basic) instead of Class::More.pm\n"
+            . "              Switch to 'use Class::More;' for attribute processing\n";
+    }
+
+    # Apply role attributes (will be processed if class can handle them)
     _apply_role_attributes($class, $role);
 
     # Validate required methods
@@ -546,7 +583,7 @@ sub _apply_role {
                 die "Conflict: method '$install_name' provided by both '$origin' and '$role' in class '$class'.\n"
                   . "Use aliasing or excludes to resolve.";
             }
-            # else: origin == $role (reinstalling same role’s method) → allow
+            # else: origin == $role (reinstalling same role's method) -> allow
         }
 
         no warnings 'redefine';
@@ -567,6 +604,15 @@ sub _apply_role_attributes {
     my ($class, $role) = @_;
 
     my $role_attrs = $ROLE_ATTRIBUTES{$role} || {};
+
+    # Use centralized attribute capability check
+    my $can_handle_attributes = _class_can_handle_attributes($class);
+
+    # If class can't handle attributes and role has them, skip processing
+    # (warnings are handled in _apply_role)
+    if (!$can_handle_attributes && %$role_attrs) {
+        return;
+    }
 
     # Ensure Class::More is loaded for attribute processing
     eval { require Class::More };

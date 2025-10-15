@@ -1,19 +1,16 @@
 package Class::More;
 
-$Class::More::VERSION    = '0.05';
+$Class::More::VERSION    = '0.04';
 $Class::More::AUTHORITY  = 'cpan:MANWAR';
 
 use strict;
 use warnings;
 
-# Performance optimization caches
+my %ACCESSOR_CACHE;
 my %BUILD_ORDER_CACHE;
 my %PARENT_LOADED_CACHE;
 my %ALL_ATTRIBUTES_CACHE;
 our %ATTRIBUTES;
-
-# Ultra-fast accessor cache
-my %ACCESSOR_CACHE;
 
 sub _generate_fast_accessor {
     my ($attr_name) = @_;
@@ -33,8 +30,8 @@ sub import {
 
     no strict 'refs';
 
-    # Install optimized new method
-    *{"${caller}::new"} = _generate_optimized_constructor($caller);
+    # Install optimised new method
+    *{"${caller}::new"} = _generate_optimised_constructor($caller);
 
     # Install has method
     *{"${caller}::has"} = \&_has;
@@ -54,8 +51,7 @@ sub import {
     }
 }
 
-# Generate highly optimized constructor
-sub _generate_optimized_constructor {
+sub _generate_optimised_constructor {
     my $class = shift;
 
     return sub {
@@ -99,7 +95,6 @@ sub _generate_optimized_constructor {
     };
 }
 
-# Ultra-fast attribute processing
 sub _process_attributes_ultra_fast {
     my ($class, $self, $args, $args_copy, $class_attrs) = @_;
 
@@ -141,7 +136,6 @@ sub _process_attributes_ultra_fast {
     }
 }
 
-# Fast attribute resolution
 sub _get_all_attributes_fast {
     my ($class) = @_;
 
@@ -167,7 +161,6 @@ sub _get_all_attributes_fast {
     return $ALL_ATTRIBUTES_CACHE{$class} = \%all_attrs;
 }
 
-# Optimized BUILD method computation
 sub _compute_build_methods_fast {
     my ($class) = @_;
 
@@ -206,7 +199,6 @@ sub _get_inheritance_tree_dfs {
     return @order;
 }
 
-# Optimized has method
 sub _has {
     my ($attr_name, %spec) = @_;
     my $current_class = caller;
@@ -365,9 +357,9 @@ minimal runtime overhead.
 
 =item * B<Inheritance Support>: Multiple inheritance with proper method resolution
 
-=item * B<BUILD Methods>: Constructor-time initialization hooks
+=item * B<BUILD Methods>: Constructor-time initialisation hooks
 
-=item * B<Performance Optimized>: Extensive caching and optimized code paths
+=item * B<Performance Optimised>: Extensive caching and optimised code paths
 
 =item * B<Role Integration>: Works seamlessly with L<Role> when available
 
@@ -432,7 +424,7 @@ The constructor method. Automatically provided by Class::More. Handles:
 
 =over 4
 
-=item * Attribute initialization with defaults
+=item * Attribute initialisation with defaults
 
 =item * Required attribute validation
 
@@ -530,9 +522,9 @@ at construction time and receive the object and constructor arguments.
 Child classes inherit parent attributes. If both parent and child define the
 same attribute, the child's specification takes precedence.
 
-=head1 PERFORMANCE OPTIMIZATIONS
+=head1 PERFORMANCE OPTIMISATIONS
 
-Class::More includes several performance optimizations:
+Class::More includes several performance optimisations:
 
 =over 4
 
@@ -542,7 +534,7 @@ Class::More includes several performance optimizations:
 
 =item * B<BUILD Order Caching>: BUILD method call order is computed once per class
 
-=item * B<Fast Inheritance Checks>: Optimized inheritance tree traversal
+=item * B<Fast Inheritance Checks>: Optimised inheritance tree traversal
 
 =item * B<Batch Operations>: Multiple accessors installed in batch when possible
 
@@ -624,7 +616,7 @@ When L<Role> is available, Class::More automatically exports:
     package My::Class;
     use Class::More;
 
-    with 'Role::Printable', 'Role::Serializable';
+    with 'Role::Printable', 'Role::Serialisable';
 
 Composes roles into your class. See L<Role> for complete documentation.
 
@@ -676,7 +668,7 @@ Checks if an object consumes a specific role.
 
 =item * B<No Immutability>: Can't make classes immutable for performance
 
-=item * B<No Serialization>: No built-in serialization/deserialization
+=item * B<No Serialisation>: No built-in serialisation/deserialisation
 
 =item * B<No Database Integration>: No ORM-like features
 
@@ -758,27 +750,50 @@ A parent class specified in C<extends> couldn't be loaded.
 
 =head1 AUTHOR
 
-Mohammad S Anwar, C<< <mohammad.anwar at yahoo.com> >>
+Mohammad Sajid Anwar, C<< <mohammad.anwar at yahoo.com> >>
 
-=head1 BUGS AND LIMITATIONS
+=head1 REPOSITORY
 
-Please report any bugs or feature requests to the issue tracker at:
+L<https://github.com/manwar/Class-Mite>
 
-L<https://github.com/manwar/Class-More/issues>
+=head1 BUGS
 
-Please note that this module is designed to be lightweight. Feature requests
-that would significantly increase complexity or reduce performance may not
-be accepted.
+Please report any bugs or feature requests through the web interface at L<https://github.com/manwar/Class-Mite/issues>.
+I will be notified and then you'll automatically be notified of progress on your bug as I make changes.
+
+=head1 SUPPORT
+
+You can find documentation for this module with the perldoc command.
+
+    perldoc Class::More
+
+You can also look for information at:
+
+=over 4
+
+=item * BUG Report
+
+L<https://github.com/manwar/Class-Mite/issues>
+
+=back
 
 =head1 LICENSE AND COPYRIGHT
 
-Copyright 2023 Mohammad S Anwar.
+Copyright (C) 2025 Mohammad Sajid Anwar.
 
-This program is free software; you can redistribute it and/or modify it
-under the terms of the Artistic License (2.0). You may obtain a copy of
-the full license at:
+This program is free software; you can redistribute it and / or modify it under the terms of the the Artistic License (2.0). You may obtain a copy of the full license at:
 
 L<http://www.perlfoundation.org/artistic_license_2_0>
+
+Any use, modification, and distribution of the Standard or Modified Versions is governed by this Artistic License. By using, modifying or distributing the Package, you accept this license. Do not use, modify, or distribute the Package, if you do not accept this license.
+
+If your Modified Version has been derived from a Modified Version made by someone other than you, you are nevertheless required to ensure that your Modified Version complies with the requirements of this license.
+
+This license does not grant you the right to use any trademark, service mark, tradename, or logo of the Copyright Holder.
+
+This license includes the non-exclusive, worldwide, free-of-charge patent license to make, have made, use, offer to sell, sell, import and otherwise transfer the Package with respect to any patent claims licensable by the Copyright Holder that are necessarily infringed by the Package. If you institute patent litigation (including a cross-claim or counterclaim) against any party alleging that the Package constitutes direct or contributory patent infringement, then this Artistic License to you shall terminate on the date that such litigation is filed.
+
+Disclaimer of Warranty: THE PACKAGE IS PROVIDED BY THE COPYRIGHT HOLDER AND CONTRIBUTORS "AS IS' AND WITHOUT ANY EXPRESS OR IMPLIED WARRANTIES. THE IMPLIED WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, OR NON-INFRINGEMENT ARE DISCLAIMED TO THE EXTENT PERMITTED BY YOUR LOCAL LAW. UNLESS REQUIRED BY LAW, NO COPYRIGHT HOLDER OR CONTRIBUTOR WILL BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, OR CONSEQUENTIAL DAMAGES ARISING IN ANY WAY OUT OF THE USE OF THE PACKAGE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 =cut
 

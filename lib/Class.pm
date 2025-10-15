@@ -11,7 +11,6 @@ use mro ();
 our @EXPORT = qw(extends with does);
 our @ISA    = qw(Exporter);
 
-# Performance optimization caches
 my %BUILD_METHODS_CACHE;
 my %METHOD_COPY_CACHE;
 
@@ -313,7 +312,7 @@ If a C<Role> module is available, you can consume roles via:
 
 This provides role-based composition for shared behavior. The Role module must be installed separately.
 
-=head1 PERFORMANCE OPTIMIZATIONS
+=head1 PERFORMANCE OPTIMISATIONS
 
 This version includes significant performance improvements:
 
@@ -333,11 +332,11 @@ This version includes significant performance improvements:
 
 =head1 CACHING
 
-Class uses internal caches to optimize performance:
+Class uses internal caches to optimise performance:
 
 =over 4
 
-=item * C<%BUILD_METHODS_CACHE> - caches linearized parent-first build order
+=item * C<%BUILD_METHODS_CACHE> - caches linearised parent-first build order
 
 =item * C<%METHOD_COPY_CACHE> - tracks which parent-child pairs have had methods copied
 
@@ -435,7 +434,7 @@ The constructor uses cached BUILD method references for optimal performance, esp
 
 Internal method that computes the BUILD methods in parent-first order using depth-first traversal.
 
-This ensures BUILD methods are called from the root parent down to the child class, which is essential for proper initialization in inheritance hierarchies.
+This ensures BUILD methods are called from the root parent down to the child class, which is essential for proper initialisation in inheritance hierarchies.
 
 =cut
 
@@ -492,7 +491,7 @@ Internal method that copies public methods from parent to child class. This meth
 
 =back
 
-This optimized implementation uses precomputed skip patterns and caching for better performance.
+This optimised implementation uses precomputed skip patterns and caching for better performance.
 
 =cut
 
@@ -567,14 +566,6 @@ You can also look for information at:
 =item * BUG Report
 
 L<https://github.com/manwar/Class-Mite/issues>
-
-=item * AnnoCPAN: Annotated CPAN documentation
-
-L<http://annocpan.org/dist/Class>
-
-=item * CPAN Ratings
-
-L<http://cpanratings.perl.org/d/Class>
 
 =back
 

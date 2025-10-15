@@ -12,7 +12,7 @@ use Time::HiRes qw(time);
 plan skip_all => 'Performance tests skipped. Set PERFORMANCE_TESTS=1 to run.'
     unless $ENV{PERFORMANCE_TESTS};
 
-# Set up test classes (same as before)
+# Set up test classes
 package Test::Performance::Class {
     use Class;
 
@@ -47,6 +47,98 @@ package Test::Performance::ClassMore {
     }
 }
 
+# Single Role implementation used by both Class and Class::More
+package Test::Performance::SimpleRole {
+    use Role;
+
+    requires 'get_name';
+
+    sub role_method {
+        my $self = shift;
+        return "role: " . $self->get_name;
+    }
+
+    sub another_role_method {
+        my $self = shift;
+        return "another: " . $self->get_name;
+    }
+}
+
+# Class with Role
+package Test::Performance::ClassWithRole {
+    use Class;
+    with 'Test::Performance::SimpleRole';
+
+    sub BUILD {
+        my ($self, $args) = @_;
+        $self->{name} = $args->{name} if $args->{name};
+    }
+
+    sub get_name {
+        my $self = shift;
+        return $self->{name} || 'anonymous';
+    }
+
+    sub own_method {
+        my $self = shift;
+        return "own: " . $self->get_name;
+    }
+}
+
+# Class::More with Role
+package Test::Performance::ClassMoreWithRole {
+    use Class::More;
+    with 'Test::Performance::SimpleRole';
+
+    has name => (default => 'anonymous');
+
+    sub get_name {
+        my $self = shift;
+        return $self->name;
+    }
+
+    sub own_method {
+        my $self = shift;
+        return "own: " . $self->get_name;
+    }
+}
+
+# Multiple roles performance test
+package Test::Performance::RoleA {
+    use Role;
+
+    sub role_a_method { "role_a" }
+}
+
+package Test::Performance::RoleB {
+    use Role;
+
+    sub role_b_method { "role_b" }
+}
+
+package Test::Performance::RoleC {
+    use Role;
+
+    sub role_c_method { "role_c" }
+}
+
+# Class with multiple roles
+package Test::Performance::ClassWithMultipleRoles {
+    use Class;
+    with qw(Test::Performance::RoleA Test::Performance::RoleB Test::Performance::RoleC);
+
+    sub own_method { "own" }
+}
+
+# Class::More with multiple roles
+package Test::Performance::ClassMoreWithMultipleRoles {
+    use Class::More;
+    with qw(Test::Performance::RoleA Test::Performance::RoleB Test::Performance::RoleC);
+
+    sub own_method { "own" }
+}
+
+# Inheritance test classes
 package Test::Performance::ClassInherit {
     use Class;
 
@@ -100,6 +192,7 @@ package Test::Performance::ClassMoreChild {
 package main;
 
 my $ITERATIONS = 100000;
+my $ROLE_ITERATIONS = 50000;
 
 # Store individual timing results
 my %timing_results;
@@ -151,6 +244,50 @@ sub run_benchmarks {
     diag sprintf "  Class:      %.4f seconds", $timing_results{class_access};
     diag sprintf "  Class::More: %.4f seconds", $timing_results{class_more_access};
 
+    # Role Composition Performance - Same Role with different classes
+    diag "\n=== Benchmarking Role Composition ($ROLE_ITERATIONS iterations) ===";
+
+    $timing_results{class_with_role} = run_highres_benchmark(sub {
+        Test::Performance::ClassWithRole->new(name => 'test');
+    }, $ROLE_ITERATIONS);
+
+    $timing_results{class_more_with_role} = run_highres_benchmark(sub {
+        Test::Performance::ClassMoreWithRole->new(name => 'test');
+    }, $ROLE_ITERATIONS);
+
+    diag sprintf "  Class + Role:      %.4f seconds", $timing_results{class_with_role};
+    diag sprintf "  Class::More + Role: %.4f seconds", $timing_results{class_more_with_role};
+
+    # Role Method Access
+    diag "\n=== Benchmarking Role Method Access ($ITERATIONS iterations) ===";
+    my $class_role_obj = Test::Performance::ClassWithRole->new(name => 'test');
+    my $class_more_role_obj = Test::Performance::ClassMoreWithRole->new(name => 'test');
+
+    $timing_results{class_role_method} = run_highres_benchmark(sub {
+        $class_role_obj->role_method;
+    });
+
+    $timing_results{class_more_role_method} = run_highres_benchmark(sub {
+        $class_more_role_obj->role_method;
+    });
+
+    diag sprintf "  Class + Role method:      %.4f seconds", $timing_results{class_role_method};
+    diag sprintf "  Class::More + Role method: %.4f seconds", $timing_results{class_more_role_method};
+
+    # Multiple Role Composition
+    diag "\n=== Benchmarking Multiple Role Composition (".($ROLE_ITERATIONS/2)." iterations) ===";
+
+    $timing_results{class_multi_role} = run_highres_benchmark(sub {
+        Test::Performance::ClassWithMultipleRoles->new;
+    }, $ROLE_ITERATIONS/2);
+
+    $timing_results{class_more_multi_role} = run_highres_benchmark(sub {
+        Test::Performance::ClassMoreWithMultipleRoles->new;
+    }, $ROLE_ITERATIONS/2);
+
+    diag sprintf "  Class + 3 Roles:      %.4f seconds", $timing_results{class_multi_role};
+    diag sprintf "  Class::More + 3 Roles: %.4f seconds", $timing_results{class_more_multi_role};
+
     # Inheritance Performance
     diag "\n=== Benchmarking Inheritance ($ITERATIONS iterations) ===";
 
@@ -162,12 +299,15 @@ sub run_benchmarks {
         Test::Performance::ClassMoreChild->new(name => 'test');
     });
 
-    diag sprintf "  Class:      %.4f seconds", $timing_results{class_inherit};
-    diag sprintf "  Class::More: %.4f seconds", $timing_results{class_more_inherit};
+    diag sprintf "  Class inheritance:      %.4f seconds", $timing_results{class_inherit};
+    diag sprintf "  Class::More inheritance: %.4f seconds", $timing_results{class_more_inherit};
 
     # Calculate combined metrics for regression detection
     $results{basic_creation_time} = $timing_results{class_create};
     $results{method_access_time} = $timing_results{class_access};
+    $results{class_with_role_time} = $timing_results{class_with_role};
+    $results{class_role_method_time} = $timing_results{class_role_method};
+    $results{class_multi_role_time} = $timing_results{class_multi_role};
     $results{inheritance_time} = $timing_results{class_inherit};
 
     return \%results;
@@ -197,7 +337,8 @@ sub save_performance_baseline {
     open my $fh, '>', $file or die "Cannot write baseline: $!";
     print $fh "# Performance baseline data - DO NOT EDIT MANUALLY\n";
     print $fh "# Generated on: " . scalar(localtime) . "\n";
-    print $fh "# Iterations: $ITERATIONS\n\n";
+    print $fh "# Iterations: $ITERATIONS\n";
+    print $fh "# Role Iterations: $ROLE_ITERATIONS\n\n";
 
     while (my ($key, $value) = each %$results) {
         print $fh "$key=$value\n";
@@ -241,7 +382,14 @@ subtest 'Performance Regression Tests' => sub {
 
         # Check for significant regressions (more than 20% slower)
         my $regression_detected = 0;
-        my @comparison_keys = qw(basic_creation_time method_access_time inheritance_time);
+        my @comparison_keys = qw(
+            basic_creation_time
+            method_access_time
+            class_with_role_time
+            class_role_method_time
+            class_multi_role_time
+            inheritance_time
+        );
 
         foreach my $key (@comparison_keys) {
             my $current = $current_results->{$key};
@@ -251,7 +399,7 @@ subtest 'Performance Regression Tests' => sub {
                 my $ratio = $current / $baseline_val;
                 my $percent_change = ($ratio - 1) * 100;
 
-                diag sprintf "%-25s: %7.4fs (baseline: %7.4fs) %+7.1f%%",
+                diag sprintf "%-30s: %7.4fs (baseline: %7.4fs) %+7.1f%%",
                     $key, $current, $baseline_val, $percent_change;
 
                 # Fail test if performance degraded more than 20%
@@ -291,7 +439,7 @@ subtest 'Performance Regression Tests' => sub {
     # Performance ratio check (Class vs Class::More)
     diag "\n=== Class vs Class::More Performance Comparison ===";
 
-    # Calculate performance ratios
+    # Calculate performance ratios for all scenarios
     my $creation_ratio = calculate_performance_ratio(
         $timing_results{class_create},
         $timing_results{class_more_create}
@@ -302,6 +450,21 @@ subtest 'Performance Regression Tests' => sub {
         $timing_results{class_more_access}
     );
 
+    my $role_compose_ratio = calculate_performance_ratio(
+        $timing_results{class_with_role},
+        $timing_results{class_more_with_role}
+    );
+
+    my $role_method_ratio = calculate_performance_ratio(
+        $timing_results{class_role_method},
+        $timing_results{class_more_role_method}
+    );
+
+    my $multi_role_ratio = calculate_performance_ratio(
+        $timing_results{class_multi_role},
+        $timing_results{class_more_multi_role}
+    );
+
     my $inherit_ratio = calculate_performance_ratio(
         $timing_results{class_inherit},
         $timing_results{class_more_inherit}
@@ -310,11 +473,15 @@ subtest 'Performance Regression Tests' => sub {
     diag "Performance Ratios:";
     diag format_performance_comparison($creation_ratio, "object creation");
     diag format_performance_comparison($access_ratio, "method access");
+    diag format_performance_comparison($role_compose_ratio, "class with role");
+    diag format_performance_comparison($role_method_ratio, "role method access");
+    diag format_performance_comparison($multi_role_ratio, "class with multiple roles");
     diag format_performance_comparison($inherit_ratio, "inheritance");
 
-    # Note: Class::More being slower is expected due to additional features
-    diag "\nNote: Class::More provides additional features (attribute handling,";
-    diag "      validation, etc.) so some performance difference is expected.";
+    # Note: Performance differences are expected due to feature sets
+    diag "\nNote: Class::More provides additional features";
+    diag "      (attribute handling, validation, etc.) so some performance";
+    diag "      difference is expected. Both use the same Role implementation.";
 
     pass("Performance analysis completed");
 };

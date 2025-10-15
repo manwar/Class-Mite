@@ -75,8 +75,11 @@ is($aliased_obj->conflicting_method_aliased, 'Conflicting', 'Aliased role: Confl
 # ----------------------------------------------------------------------
 eval { require TestClass::Alias::Conflict; };
 # FIX: Added (?s:...) for multiline match
-like($@, qr/(?s:Method conflict.*exclusive_method \(aliased to common_method\).*TestRole::Basic.*TestRole::Conflicting)/,
-    'FATAL: Alias target conflict dies with correct error');
+like(
+    $@,
+    qr/Method conflict:.*aliased to common_method.*between TestRole::Basic and TestRole::Conflicting/,
+    'FATAL: Alias target conflict dies with correct error'
+);
 
 
 # ----------------------------------------------------------------------

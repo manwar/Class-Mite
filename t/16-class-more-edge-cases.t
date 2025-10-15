@@ -76,7 +76,7 @@ is($undef->zero_attr, 0, 'Zero default works');
 
     has next_counter => (default => sub {
         my ($self) = @_;
-        return $self->counter + 1;
+        return ($self->counter // 0) + 1;
     });
 }
 

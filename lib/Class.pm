@@ -3,9 +3,196 @@ package Class;
 $Class::VERSION   = '0.04';
 $Class::AUTHORITY = 'cpan:MANWAR';
 
+use strict;
+use warnings;
+use Exporter;
+use mro ();
+
+our @EXPORT = qw(extends with does);
+our @ISA    = qw(Exporter);
+
+# Performance optimization caches
+my %BUILD_METHODS_CACHE;
+my %METHOD_COPY_CACHE;
+
+# Precomputed skip patterns for faster method filtering
+my %SKIP_METHODS = map { $_ => 1 } qw(
+    BUILD new extends with does import AUTOLOAD DESTROY BEGIN END
+    ISA VERSION EXPORT AUTHORITY INC
+);
+
+sub new {
+    my $class = shift;
+    my %attrs = @_;
+    my $self = bless { %attrs }, $class;
+
+    # Use cached BUILD methods for maximum performance
+    my $build_methods = $BUILD_METHODS_CACHE{$class} ||= _compute_build_methods($class);
+    $_->($self, \%attrs) for @$build_methods;
+
+    return $self;
+}
+
+sub _compute_build_methods {
+    my $class = shift;
+
+    my @build_order;
+    my %visited;
+
+    # Depth-first traversal for true parent-first order
+    _depth_first_traverse($class, \@build_order, \%visited);
+
+    my @build_methods;
+    foreach my $c (@build_order) {
+        no strict 'refs';
+        if (defined &{"${c}::BUILD"}) {
+            push @build_methods, \&{"${c}::BUILD"};
+        }
+    }
+
+    return \@build_methods;
+}
+
+sub _depth_first_traverse {
+    my ($class, $order, $visited) = @_;
+
+    return if $visited->{$class}++;
+
+    no strict 'refs';
+    my @parents = @{"${class}::ISA"};
+
+    # Process all parents first (depth-first)
+    foreach my $parent (@parents) {
+        _depth_first_traverse($parent, $order, $visited);
+    }
+
+    # Then add current class
+    push @$order, $class;
+}
+
+sub extends {
+    my ($maybe_class, @maybe_parents) = @_;
+    my $child_class = caller;
+
+    _delete_build_cache($child_class);
+
+    my @parents = @maybe_parents ? ($maybe_class, @maybe_parents) : ($maybe_class);
+
+    no strict 'refs';
+
+    for my $parent_class (@parents) {
+        die "Recursive inheritance detected: $child_class cannot extend itself"
+            if $child_class eq $parent_class;
+
+        # Efficient parent loading - only load from disk if necessary
+        unless ($INC{"$parent_class.pm"} || defined &{"${parent_class}::new"}) {
+            (my $parent_file = "$parent_class.pm") =~ s{::}{/}g;
+            eval { require $parent_file };
+            # ignore errors - parent might be defined inline
+        }
+
+        # Link inheritance if not already linked
+        unless (grep { $_ eq $parent_class } @{"${child_class}::ISA"}) {
+            push @{"${child_class}::ISA"}, $parent_class;
+        }
+
+        # Copy public methods from parent to child for direct access
+        _copy_public_methods($child_class, $parent_class);
+    }
+}
+
+sub _copy_public_methods {
+    my ($child, $parent) = @_;
+
+    # Use cache to avoid re-copying methods for same parent-child pair
+    my $cache_key = "$child|$parent";
+    return if $METHOD_COPY_CACHE{$cache_key};
+    $METHOD_COPY_CACHE{$cache_key} = 1;
+
+    no strict 'refs';
+    my $parent_symtab = \%{"${parent}::"};
+
+    # Single pass with optimized checks
+    for my $method (keys %$parent_symtab) {
+        # Skip special methods and private methods quickly
+        next if $SKIP_METHODS{$method};
+        next if $method =~ /^_/;
+        next if $method =~ /::$/;  # Skip nested packages
+
+        # Skip if already defined in child or not a CODE ref in parent
+        next if defined &{"${child}::${method}"};
+        next unless defined &{"${parent}::${method}"};
+
+        # Copy the method
+        *{"${child}::${method}"} = \&{"${parent}::${method}"};
+    }
+}
+
+sub _delete_build_cache {
+    my ($class) = @_;
+    delete $BUILD_METHODS_CACHE{$class};
+
+    # Clear cache for all classes that inherit from this one
+    for my $cached_class (keys %BUILD_METHODS_CACHE) {
+        if (_inherits_from($cached_class, $class)) {
+            delete $BUILD_METHODS_CACHE{$cached_class};
+        }
+    }
+
+    # Also clear method copy cache for affected classes
+    for my $cache_key (keys %METHOD_COPY_CACHE) {
+        my ($child, $parent) = split(/\|/, $cache_key);
+        if ($child eq $class || _inherits_from($child, $class)) {
+            delete $METHOD_COPY_CACHE{$cache_key};
+        }
+    }
+}
+
+sub _inherits_from {
+    my ($class, $parent) = @_;
+
+    no strict 'refs';
+    my @isa = @{"${class}::ISA"};
+
+    return 1 if grep { $_ eq $parent } @isa;
+
+    foreach my $direct_parent (@isa) {
+        return 1 if _inherits_from($direct_parent, $parent);
+    }
+
+    return 0;
+}
+
+sub import {
+    my ($class, @args) = @_;
+    my $caller = caller;
+
+    # Enable strict and warnings
+    strict->import;
+    warnings->import;
+
+    # Load Role.pm if exists
+    eval { require Role };
+    if (!$@) {
+        no strict 'refs';
+        *{"${caller}::with"} = \&Role::with;
+        *{"${caller}::does"} = \&Role::does;
+    }
+
+    # Install new and extends
+    no strict 'refs';
+    *{"${caller}::new"}     = \&Class::new;
+    *{"${caller}::extends"} = \&Class::extends;
+
+    # optional extends => Parent
+    if (@args && $args[0] eq 'extends') {
+        $class->extends(@args[1..$#args]);
+    }
+}
+
 =head1 NAME
 
-Class - Lightweight Perl object system with parent-first BUILD and optional roles
+Class - Lightweight Perl object system with parent-first BUILD and method copying
 
 =head1 VERSION
 
@@ -53,229 +240,182 @@ Class provides a lightweight Perl object system with:
 
 =item * Parent-first constructor building via C<BUILD> methods.
 
-=item * Simple inheritance via C<extends>.
+=item * Simple inheritance via C<extends> with method copying.
 
 =item * Optional role consumption via C<with> and C<does> (if C<Role> module is available).
 
 =item * Automatic caching of BUILD order for efficient object creation.
 
-=back
-
-=head1 EXPORT
-
-The following functions are exported by default:
-
-=over 4
-
-=item * C<extends>
-
-=item * C<with> (if Role.pm is available)
-
-=item * C<does> (if Role.pm is available)
+=item * Optimized method copying for better performance.
 
 =back
+
+This module includes performance optimizations such as cached BUILD method resolution,
+efficient parent class loading, and optimized method copying with caching.
 
 =cut
 
-use strict;
-use warnings;
-use Exporter;
-use mro ();
+=head1 BUILD METHODS
 
-our @EXPORT = qw(extends with does);
-our @ISA    = qw(Exporter);
+Classes can define a C<BUILD> method:
 
-my %BUILD_ORDER_CACHE;
-my %BUILD_METHODS_CACHE;
-my %PARENT_LOADED_CACHE;
-
-sub new {
-    my $class = shift;
-    my %attrs = @_;
-    my $self = bless { %attrs }, $class;
-
-    my $build_methods = $BUILD_METHODS_CACHE{$class} ||= _compute_build_methods($class);
-    $_->($self, \%attrs) for @$build_methods;
-
-    return $self;
-}
-
-sub _compute_build_methods {
-    my $class = shift;
-
-    my %seen;
-    my @parent_first;
-    my @stack = ($class);
-
-    # Iterative DFS that ensures true parent-first order
-    while (@stack) {
-        my $current = pop @stack;
-
-        if ($seen{$current}) {
-            # If we've seen it but it's not in order yet, skip
-            next;
-        }
-
-        # Check if all parents are already processed or in order
-        no strict 'refs';
-        my @parents = @{"${current}::ISA"};
-        my $all_parents_ready = 1;
-
-        foreach my $parent (@parents) {
-            if (!$seen{$parent}) {
-                $all_parents_ready = 0;
-                last;
-            }
-        }
-
-        if ($all_parents_ready) {
-            # All parents are processed, we can add this class
-            $seen{$current} = 1;
-            push @parent_first, $current;
-        } else {
-            # All parents are processed, we can add this class
-            push @stack, $current;
-            foreach my $parent (reverse @parents) {
-                push @stack, $parent unless $seen{$parent};
-            }
-        }
+    sub BUILD {
+        my ($self, $attrs) = @_;
+        # initialize object
     }
 
-    # Get BUILD methods in parent-first order
-    my @build_methods;
-    foreach my $c (@parent_first) {
-        no strict 'refs';
+All BUILD methods in the inheritance chain are called in parent-first order during C<new>. The order is determined by depth-first traversal, ensuring that parent classes are always initialized before their children.
 
-        # Multiple detection methods
-        my $build_found = 0;
+For diamond inheritance patterns:
 
-        # Method 1: Direct symbol check
-        if (defined &{"${c}::BUILD"}) {
-            push @build_methods, \&{"${c}::BUILD"};
-            $build_found = 1;
-        }
+    A
+   / \
+  B   C
+   \ /
+    D
 
-        # Method 2: Check if method exists
-        if (!$build_found && $c->can('BUILD')) {
-            push @build_methods, $c->can('BUILD');
-            $build_found = 1;
-        }
+BUILD methods are called in the order: A, B, C, D (true parent-first order)
 
-        # Method 3: Check symbol table directly
-        if (!$build_found) {
-            my @methods = grep { defined &{"${c}::$_"} } keys %{"${c}::"};
-        }
-    }
+=head1 METHOD COPYING
 
-    return \@build_methods;
-}
+This system copies public methods from parent classes to child classes. This design enables:
 
-sub extends {
-    my ($maybe_class, @maybe_parents) = @_;
-    my $child_class = caller;
+=over 4
 
-    delete_build_cache($child_class);
+=item * Direct method access in child symbol tables
 
-    my @parents = @maybe_parents ? ($maybe_class, @maybe_parents) : ($maybe_class);
+=item * Proper functioning of object cloning
 
+=item * Better performance for frequently called methods
+
+=item * Compatibility with code that expects direct method access
+
+=back
+
+The following methods are NOT copied:
+
+=over 4
+
+=item * Special methods (BUILD, new, extends, with, does, import, AUTOLOAD, DESTROY)
+
+=item * Private methods (starting with underscore)
+
+=item * Package metadata (ISA, VERSION, EXPORT, etc.)
+
+=back
+
+=head1 ROLES
+
+If a C<Role> module is available, you can consume roles via:
+
+    with 'RoleName';
+    does 'RoleName';
+
+This provides role-based composition for shared behavior. The Role module must be installed separately.
+
+=head1 PERFORMANCE OPTIMIZATIONS
+
+This version includes significant performance improvements:
+
+=over 4
+
+=item * Cached BUILD method resolution using depth-first parent-first order
+
+=item * Precomputed skip patterns for fast method filtering
+
+=item * Method copying cache to avoid duplicate operations
+
+=item * Efficient parent class loading with minimal overhead
+
+=item * Optimized symbol table scanning
+
+=back
+
+=head1 CACHING
+
+Class uses internal caches to optimize performance:
+
+=over 4
+
+=item * C<%BUILD_METHODS_CACHE> - caches linearized parent-first build order
+
+=item * C<%METHOD_COPY_CACHE> - tracks which parent-child pairs have had methods copied
+
+=back
+
+Caches are automatically updated when inheritance changes via C<extends>.
+
+=head1 ERROR HANDLING
+
+=over 4
+
+=item * Recursive inheritance is detected and throws an exception.
+
+=item * Failure to load a parent class is non-fatal (parent might be defined inline).
+
+=back
+
+=head1 EXAMPLES
+
+=head2 Basic Inheritance with Method Copying
+
+    package Animal;
+    use Class;
+    sub speak { "animal sound" }
+    sub eat   { "eating" }
+
+    package Dog;
+    use Class;
+    extends 'Animal';
+    sub speak { "woof" }  # Overrides parent method
+
+    my $dog = Dog->new;
+    print $dog->speak;  # "woof" (from Dog)
+    print $dog->eat;    # "eating" (copied from Animal)
+
+    # Method is copied to Dog's symbol table
     no strict 'refs';
+    print defined &Dog::eat ? "copied" : "not copied";  # "copied"
 
-    for my $parent_class (@parents) {
-        die "Recursive inheritance detected: $child_class cannot extend itself"
-            if $child_class eq $parent_class;
+=head2 Diamond Inheritance
 
-        # Only load from disk if parent has no methods AND not in %INC
-        my $parent_has_methods = 0;
-        {
-            no strict 'refs';
-            # Check if parent has any non-special methods
-            $parent_has_methods = grep {
-                defined &{"${parent_class}::$_"} &&
-                !/^(?:ISA|VERSION|EXPORT|AUTHORITY|BEGIN|END|DESTROY|INC)$/
-            } keys %{"${parent_class}::"};
-        }
+    package A;
+    use Class;
+    sub BUILD { print "A BUILD\n" }
 
-        # Only load from disk if parent has no methods AND is not in %INC
-        unless ($parent_has_methods || $INC{"$parent_class.pm"}) {
-            (my $parent_file = "$parent_class.pm") =~ s{::}{/}g;
-            eval {
-                require $parent_file;
-                $PARENT_LOADED_CACHE{$parent_class} = 1;
-            };
-            if ($@) {
-                # Don't die - the parent might be defined inline in the test
-                # Just continue and hope the parent class is already defined
-            }
-        }
+    package B;
+    use Class;
+    extends 'A';
+    sub BUILD { print "B BUILD\n" }
 
-        # Link inheritance if not already linked
-        push @{"${child_class}::ISA"}, $parent_class
-            unless grep { $_ eq $parent_class } @{"${child_class}::ISA"};
+    package C;
+    use Class;
+    extends 'A';
+    sub BUILD { print "C BUILD\n" }
 
-        # Copy parent methods into child for performance
-        my $parent_symtab = \%{"${parent_class}::"};
-        for my $method (keys %$parent_symtab) {
-            next if $method =~ /^(?:BUILD|new|extends|with|does|import|AUTOLOAD|DESTROY|BEGIN|END)$/;
-            next if $method =~ /^_/;
-            next if $method eq 'ISA' || $method eq 'VERSION' || $method eq 'EXPORT' || $method eq 'AUTHORITY';
-            next if $method =~ /::$/;  # Skip nested packages
+    package D;
+    use Class;
+    extends 'B', 'C';
+    sub BUILD { print "D BUILD\n" }
 
-            # Only copy if not already defined
-            if (!defined &{"${child_class}::${method}"} && defined &{"${parent_class}::${method}"}) {
-                *{"${child_class}::${method}"} = \&{"${parent_class}::${method}"};
-            }
-        }
+    my $d = D->new;
+    # Output: A BUILD, B BUILD, C BUILD, D BUILD
 
-        # Set MRO to C3 for correct linearization
-        mro::set_mro($child_class, 'c3');
-    }
-}
+=head2 Object Cloning with Method Copying
 
-sub delete_build_cache {
-    my ($class) = @_;
-    delete $BUILD_ORDER_CACHE{$class};
-    for my $cached_class (keys %BUILD_ORDER_CACHE) {
-        if (grep { $_ eq $class } @{mro::get_linear_isa($cached_class)}) {
-            delete $BUILD_ORDER_CACHE{$cached_class};
-        }
-    }
-}
+    package Base;
+    use Class;
+    sub clone_method { "works" }
 
-sub import {
-    my ($class, @args) = @_;
-    my $caller = caller;
+    package Child;
+    use Class;
+    extends 'Base';
 
-    # Enable strict and warnings in the caller
-    {
-        no strict 'refs';
-        *{"${caller}::strict::import"}  = \&strict::import;
-        *{"${caller}::warnings::import"} = \&warnings::import;
-        strict->import;
-        warnings->import;
-    }
+    my $original = Child->new;
+    my $cloned = bless { %$original }, ref($original);
 
-    # Load Role.pm if exists
-    eval { require Role };
-    if (!$@) {
-        *Class::with = \&Role::with;
-        *Class::does = \&Role::does;
-        no strict 'refs';
-        *{"${caller}::with"} = \&Role::with;
-        *{"${caller}::does"} = \&Role::does;
-        use strict 'refs';
-    }
-
-    # Always install new and extends
-    no strict 'refs';
-    *{"${caller}::new"}     = \&Class::new;
-    *{"${caller}::extends"} = \&Class::extends;
-    use strict 'refs';
-
-    # optional extends => Parent
-    if (@args && @args == 2 && $args[0] eq 'extends') {
-        $class->extends($args[1]);
-    }
-}
+    # Works because methods are copied to Child
+    print $cloned->clone_method;  # "works"
 
 =head1 METHODS
 
@@ -285,12 +425,96 @@ sub import {
 
 Constructs a new object of the class, calling all C<BUILD> methods from parent classes in parent-first order. All attributes are passed to C<BUILD> as a hashref.
 
+The constructor uses cached BUILD method references for optimal performance, especially in deep inheritance hierarchies.
+
+=cut
+
+=head2 _compute_build_methods
+
+    my $build_methods = _compute_build_methods($class);
+
+Internal method that computes the BUILD methods in parent-first order using depth-first traversal.
+
+This ensures BUILD methods are called from the root parent down to the child class, which is essential for proper initialization in inheritance hierarchies.
+
+=cut
+
+=head2 _depth_first_traverse
+
+    _depth_first_traverse($class, \@order, \%visited);
+
+Internal recursive method that performs depth-first traversal of the inheritance hierarchy.
+
+This method ensures that parent classes are always processed before their children, which is crucial for correct BUILD method ordering.
+
+=cut
+
 =head2 extends
 
     extends 'ParentClass';
     extends 'Parent1', 'Parent2';
 
-Adds one or more parent classes to the calling class. Automatically loads the parent class if not already loaded and prevents recursive inheritance. Duplicate parents are ignored.
+Adds one or more parent classes to the calling class. This method:
+
+=over 4
+
+=item * Automatically loads parent classes if not already loaded
+
+=item * Prevents recursive inheritance
+
+=item * Copies public methods from parents to children
+
+=item * Maintains inheritance via C<@ISA>
+
+=item * Clears relevant caches to ensure consistency
+
+=back
+
+Method copying is performed to ensure that inherited methods are directly available in the child class's symbol table, which enables features like object cloning to work correctly.
+
+=cut
+
+=head2 _copy_public_methods
+
+    _copy_public_methods($child_class, $parent_class);
+
+Internal method that copies public methods from parent to child class. This method:
+
+=over 4
+
+=item * Skips special methods (BUILD, new, extends, etc.)
+
+=item * Skips private methods (starting with underscore)
+
+=item * Uses caching to avoid duplicate copying
+
+=item * Only copies methods not already defined in child
+
+=back
+
+This optimized implementation uses precomputed skip patterns and caching for better performance.
+
+=cut
+
+=head2 _delete_build_cache
+
+    _delete_build_cache($class);
+
+Internal method that clears the BUILD methods cache for a class and all classes that inherit from it.
+
+This ensures cache consistency when inheritance relationships change. Also clears method copy caches for affected classes.
+
+=cut
+
+=head2 _inherits_from
+
+    _inherits_from($class, $parent);
+
+Internal recursive method that checks if a class inherits from another class, either directly or indirectly.
+
+Returns true if C<$class> inherits from C<$parent>, false otherwise.
+
+=cut
 
 =head1 IMPORT
 
@@ -313,72 +537,9 @@ Optionally, you can specify C<extends> in the import statement to immediately se
 
     use Class 'extends' => 'Parent';
 
-=head1 BUILD METHODS
+The import method also enables L<strict> and L<warnings> in the calling package.
 
-Classes can define a C<BUILD> method:
-
-    sub BUILD {
-        my ($self, $attrs) = @_;
-        # initialize object
-    }
-
-All BUILD methods in the inheritance chain are called in parent-first order, ensuring proper initialization.
-
-=head1 ROLES
-
-If a C<Role> module is available, you can consume roles via:
-
-    with 'RoleName';
-    does 'RoleName';
-
-This provides role-based composition for shared behavior.
-
-=head1 CACHING
-
-Class uses internal caches to optimize object construction:
-
-=over 4
-
-=item * %BUILD_ORDER_CACHE - caches linearized parent-first build order.
-
-=item * %PARENT_LOADED_CACHE - ensures parent classes are loaded only once.
-
-=back
-
-Caches are automatically updated when C<extends> is called.
-
-=head1 ERROR HANDLING
-
-=over 4
-
-=item * Recursive inheritance is detected and throws an exception.
-
-=item * Failure to load a parent class dies with a meaningful error.
-
-=back
-
-=head1 EXAMPLES
-
-    package Animal;
-    use Class;
-
-    sub BUILD {
-        my ($self, $attrs) = @_;
-        $self->{species} = $attrs->{species};
-    }
-
-    package Dog;
-    use Class;
-    extends 'Animal';
-
-    sub BUILD {
-        my ($self, $attrs) = @_;
-        $self->{breed} = $attrs->{breed};
-    }
-
-    my $dog = Dog->new(species => 'Canine', breed => 'Labrador');
-    print $dog->{species}; # Canine
-    print $dog->{breed};   # Labrador
+=cut
 
 =head1 AUTHOR
 
@@ -391,8 +552,7 @@ L<https://github.com/manwar/Class-Mite>
 =head1 BUGS
 
 Please report any bugs or feature requests through the web interface at L<https://github.com/manwar/Class-Mite/issues>.
-I will be notified and then you'll automatically be notified of progress on your
-bug as I make changes.
+I will be notified and then you'll automatically be notified of progress on your bug as I make changes.
 
 =head1 SUPPORT
 
@@ -408,45 +568,33 @@ You can also look for information at:
 
 L<https://github.com/manwar/Class-Mite/issues>
 
+=item * AnnoCPAN: Annotated CPAN documentation
+
+L<http://annocpan.org/dist/Class>
+
+=item * CPAN Ratings
+
+L<http://cpanratings.perl.org/d/Class>
+
 =back
 
 =head1 LICENSE AND COPYRIGHT
 
 Copyright (C) 2025 Mohammad Sajid Anwar.
 
-This program is free software; you can redistribute it and / or modify it under
-the terms of the the Artistic License (2.0). You may obtain a copy of the full
-license at:
+This program is free software; you can redistribute it and / or modify it under the terms of the the Artistic License (2.0). You may obtain a copy of the full license at:
 
 L<http://www.perlfoundation.org/artistic_license_2_0>
 
-Any use, modification, and distribution of the Standard or Modified Versions is
-governed by this Artistic License.By using, modifying or distributing the Package,
-you accept this license. Do not use, modify, or distribute the Package, if you do
-not accept this license.
+Any use, modification, and distribution of the Standard or Modified Versions is governed by this Artistic License. By using, modifying or distributing the Package, you accept this license. Do not use, modify, or distribute the Package, if you do not accept this license.
 
-If your Modified Version has been derived from a Modified Version made by someone
-other than you,you are nevertheless required to ensure that your Modified Version
-complies with the requirements of this license.
+If your Modified Version has been derived from a Modified Version made by someone other than you, you are nevertheless required to ensure that your Modified Version complies with the requirements of this license.
 
-This license does not grant you the right to use any trademark, service mark,
-tradename, or logo of the Copyright Holder.
+This license does not grant you the right to use any trademark, service mark, tradename, or logo of the Copyright Holder.
 
-This license includes the non-exclusive, worldwide, free-of-charge patent license
-to make, have made, use, offer to sell, sell, import and otherwise transfer the
-Package with respect to any patent claims licensable by the Copyright Holder that
-are necessarily infringed by the Package. If you institute patent litigation
-(including a cross-claim or counterclaim) against any party alleging that the
-Package constitutes direct or contributory patent infringement,then this Artistic
-License to you shall terminate on the date that such litigation is filed.
+This license includes the non-exclusive, worldwide, free-of-charge patent license to make, have made, use, offer to sell, sell, import and otherwise transfer the Package with respect to any patent claims licensable by the Copyright Holder that are necessarily infringed by the Package. If you institute patent litigation (including a cross-claim or counterclaim) against any party alleging that the Package constitutes direct or contributory patent infringement, then this Artistic License to you shall terminate on the date that such litigation is filed.
 
-Disclaimer of Warranty: THE PACKAGE IS PROVIDED BY THE COPYRIGHT HOLDER AND
-CONTRIBUTORS "AS IS' AND WITHOUT ANY EXPRESS OR IMPLIED WARRANTIES. THE IMPLIED
-WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, OR
-NON-INFRINGEMENT ARE DISCLAIMED TO THE EXTENT PERMITTED BY YOUR LOCAL LAW. UNLESS
-REQUIRED BY LAW, NO COPYRIGHT HOLDER OR CONTRIBUTOR WILL BE LIABLE FOR ANY DIRECT,
-INDIRECT, INCIDENTAL, OR CONSEQUENTIAL DAMAGES ARISING IN ANY WAY OUT OF THE USE
-OF THE PACKAGE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+Disclaimer of Warranty: THE PACKAGE IS PROVIDED BY THE COPYRIGHT HOLDER AND CONTRIBUTORS "AS IS' AND WITHOUT ANY EXPRESS OR IMPLIED WARRANTIES. THE IMPLIED WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, OR NON-INFRINGEMENT ARE DISCLAIMED TO THE EXTENT PERMITTED BY YOUR LOCAL LAW. UNLESS REQUIRED BY LAW, NO COPYRIGHT HOLDER OR CONTRIBUTOR WILL BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, OR CONSEQUENTIAL DAMAGES ARISING IN ANY WAY OUT OF THE USE OF THE PACKAGE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 =cut
 

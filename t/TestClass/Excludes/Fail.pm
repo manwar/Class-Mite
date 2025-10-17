@@ -1,7 +1,6 @@
 package TestClass::Excludes::Fail;
-use Role;
+use Class;
 with 'TestRole::Basic', 'TestRole::Excludes'; # Conflict here!
 
-sub new { bless {}, shift }
 
 1;

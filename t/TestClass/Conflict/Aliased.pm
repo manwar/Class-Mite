@@ -1,5 +1,5 @@
 package TestClass::Conflict::Aliased;
-use Role;
+use Class;
 with
     'TestRole::Basic',
     {
@@ -7,6 +7,5 @@ with
         alias => { common_method => 'conflicting_method_aliased' }
     };
 
-sub new { bless {}, shift }
 
 1;

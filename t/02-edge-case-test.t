@@ -52,7 +52,8 @@ END_PACKAGE
     use Role;
 
     package TestClassEmpty;
-    use Role 'EmptyRole';
+    use Class;
+    with 'EmptyRole';
     sub some_method { "works" }
 
     package main;
@@ -71,7 +72,8 @@ END_PACKAGE
     sub normal_method { "normal_method" }
 
     package TestClassNormal;
-    use Role 'NormalRole';
+    use Class;
+    with 'NormalRole';
 
     package main;
 
@@ -114,7 +116,7 @@ END_PACKAGE
     sub runtime_instance_method { "instance_application" }
 
     package TestClassRuntime;
-    sub new { bless {}, shift }
+    use Class;
 
     package main;
 
@@ -138,7 +140,8 @@ END_PACKAGE
     sub MethodWithCaps { "caps_work" }
 
     package TestClassSpecial;
-    use Role 'SpecialMethodRole';
+    use Class;
+    with 'SpecialMethodRole';
 
     package main;
 
@@ -156,15 +159,17 @@ END_PACKAGE
     sub inherited_method { "inherited" }
 
     package BaseClass;
-    use Role 'InheritedRole';
+    use Class;
+    with 'InheritedRole';
 
     package ChildClass;
-    use parent -norequire => 'BaseClass';
+    use Class;
+    extends 'BaseClass';
     sub child_method { "child" }
 
     package main;
 
-    my $child = bless {}, 'ChildClass';
+    my $child = ChildClass->new;
     is($child->inherited_method(), "inherited", "Inherited role method works");
     is($child->child_method(), "child", "Child class method works");
 
@@ -181,7 +186,8 @@ END_PACKAGE
     sub safe_method { "safe" }
 
     package TestClassSafe;
-    use Role 'SafeRole';
+    use Class;
+    with 'SafeRole';
 
     package main;
 
@@ -235,7 +241,7 @@ END_PACKAGE
     # 2. Second role should now DIE with a conflict error
     throws_ok {
         Role::apply_role('TestClassConflict', 'ConflictRoleB');
-    } qr/Conflict: method 'conflicting_method' provided by both/,
+    } qr/Method conflict: method 'conflicting_method' provided by both/,
        "Role vs Role method conflict is fatal like Moo::Role";
 }
 

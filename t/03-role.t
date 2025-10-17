@@ -54,7 +54,7 @@ like($@, qr/Role 'TestRole::Excludes' cannot be composed with role\(s\): TestRol
 local $@;
 eval { require TestClass::Conflict::Fatal; };
 
-like($@, qr/Conflict: method 'common_method' provided by both 'TestRole::Basic' and 'TestRole::Conflicting'/,
+like($@, qr/Method conflict: method 'common_method' provided by both 'TestRole::Basic' and 'TestRole::Conflicting'/,
     'FATAL: Applying conflicting roles without alias/excludes dies with correct error');
 
 
@@ -74,7 +74,6 @@ is($aliased_obj->conflicting_method_aliased, 'Conflicting', 'Aliased role: Confl
 # 6. Alias Conflict (Should fail if alias target already exists)
 # ----------------------------------------------------------------------
 eval { require TestClass::Alias::Conflict; };
-# FIX: Added (?s:...) for multiline match
 like(
     $@,
     qr/Method conflict:.*aliased to common_method.*between TestRole::Basic and TestRole::Conflicting/,
@@ -87,8 +86,7 @@ like(
 # ----------------------------------------------------------------------
 {
     package Class::Runtime;
-    use Role;
-    sub new { bless {}, shift }
+    use Class;
 }
 
 ok(!Class::Runtime->new->does('TestRole::Basic'), 'does() returns false before runtime application');

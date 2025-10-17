@@ -58,7 +58,7 @@ my $conflict_error;
     };
     $conflict_error = $@;
 }
-like($conflict_error, qr/Conflict: method 'conflicting_method' provided by both/,
+like($conflict_error, qr/Method conflict: method 'conflicting_method' provided by both/,
      'Method conflicts between roles are still detected');
 
 # Test 3: 'has' should not cause conflicts between roles

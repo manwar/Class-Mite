@@ -1,7 +1,6 @@
 package TestClass::Conflict::Fatal;
-use Role;
+use Class;
 with 'TestRole::Basic', 'TestRole::Conflicting'; # Conflict on common_method
 
-sub new { bless {}, shift }
 
 1;

@@ -1,5 +1,5 @@
 package TestClass::Alias::Conflict;
-use Role;
+use Class;
 with
     'TestRole::Basic', # Provides common_method
     {
@@ -7,6 +7,5 @@ with
         alias => { exclusive_method => 'common_method' } # Tries to alias to an existing method
     };
 
-sub new { bless {}, shift }
 
 1;

@@ -1,6 +1,6 @@
 package Class::Clone;
 
-$Class::Clone::VERSION    = '0.04';
+$Class::Clone::VERSION    = '0.05';
 $Class::Clone::AUTHORITY  = 'cpan:MANWAR';
 
 use strict;
@@ -32,7 +32,7 @@ Class::Clone - Add clone method to Class-based classes
 
 =head1 VERSION
 
-Version 0.04
+Version 0.05
 
 =head1 SYNOPSIS
 

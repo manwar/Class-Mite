@@ -1,6 +1,6 @@
 package Class;
 
-$Class::VERSION   = '0.04';
+$Class::VERSION   = '0.05';
 $Class::AUTHORITY = 'cpan:MANWAR';
 
 use strict;
@@ -195,7 +195,7 @@ Class - Lightweight Perl object system with parent-first BUILD and method copyin
 
 =head1 VERSION
 
-Version 0.04
+Version 0.05
 
 =head1 SYNOPSIS
 

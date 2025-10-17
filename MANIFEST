@@ -51,6 +51,7 @@ t/99-performance-regression.t
 t/class_inheritance.t
 t/cross_file_inheritance.t
 t/role-with-requires.t
+t/role-composition.t
 t/performance.baseline
 t/manifest.t
 t/pod.t

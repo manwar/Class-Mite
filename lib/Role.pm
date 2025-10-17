@@ -1,6 +1,6 @@
 package Role;
 
-$Role::VERSION   = '0.04';
+$Role::VERSION   = '0.05';
 $Role::AUTHORITY = 'cpan:MANWAR';
 
 use strict;
@@ -17,16 +17,117 @@ our %ROLE_LOAD_CACHE;
 our %CAN_HANDLE_ATTR_CACHE;
 our %ROLE_METHODS_CACHE;
 
-# Precomputed skip patterns for faster method filtering
+# Precomputed skip patterns
 my %SKIP_METHODS = map { $_ => 1 } qw(
-    BEGIN END import DESTROY new requires excludes IS_ROLE with has does
+    BEGIN END import DESTROY new requires
+    excludes IS_ROLE with has does
     AUTOLOAD VERSION AUTHORITY INC
 );
+
+sub import {
+    my ($class, @args) = @_;
+    my $caller = caller;
+    no strict 'refs';
+
+    $IS_ROLE{$caller} = 1;
+
+    if (@args == 0) {
+        $REQUIRED_METHODS{$caller} = [];
+        *{"${caller}::requires"} = \&requires;
+        *{"${caller}::excludes"} = \&excludes;
+        *{"${caller}::has"} = \&_role_has;
+    } else {
+        _setup_role_application($caller, @args);
+    }
+
+    strict->import;
+    warnings->import;
+    _export_with($caller);
+}
+
+sub with {
+    my (@roles) = @_;
+    my $caller = caller;
+
+    # Called inside a ROLE
+    if ($IS_ROLE{$caller}) {
+        my ($clean_roles_ref, $aliases_by_role)
+            = _process_role_arguments(@roles);
+        $METHOD_ALIASES{$caller} = $aliases_by_role;
+
+        foreach my $role (@$clean_roles_ref) {
+            _ensure_role_loaded($role);
+            push @{ $APPLIED_ROLES{$caller} ||= [] }, $role;
+
+            # Merge required methods
+            if (my $req = $REQUIRED_METHODS{$role}) {
+                push @{ $REQUIRED_METHODS{$caller} ||= [] }, @$req;
+            }
+        }
+
+        return;
+    }
+
+    apply_role($caller, @roles);
+}
+
+sub requires {
+    my (@methods) = @_;
+    my $caller = caller;
+    $REQUIRED_METHODS{$caller} = [] unless exists $REQUIRED_METHODS{$caller};
+    push @{$REQUIRED_METHODS{$caller}}, @methods;
+}
+
+sub excludes {
+    my (@excluded_roles) = @_;
+    my $caller = caller;
+    $EXCLUDED_ROLES{$caller} = [] unless exists $EXCLUDED_ROLES{$caller};
+    push @{$EXCLUDED_ROLES{$caller}}, @excluded_roles;
+}
+
+sub apply_role {
+    my ($class, @roles) = @_;
+    my $target_class = ref($class) ? ref($class) : $class;
+    my ($clean_roles_ref, $aliases_by_role) =
+        _process_role_arguments(@roles);
+
+    $METHOD_ALIASES{$target_class} = {
+        %{$METHOD_ALIASES{$target_class} || {}},
+        %$aliases_by_role
+    };
+
+    foreach my $role (@$clean_roles_ref) {
+        _apply_single_role($target_class, $role);
+    }
+
+    _add_does_method($target_class);
+    return 1;
+}
+
+sub get_applied_roles {
+    my ($class) = @_;
+    my $target_class = ref($class) ? ref($class) : $class;
+    return @{$APPLIED_ROLES{$target_class} || []};
+}
+
+sub is_role {
+    my ($package) = @_;
+    return $IS_ROLE{$package};
+}
 
 sub Role::does {
     my ($class_or_obj, $role) = @_;
     return _class_does_role(ref($class_or_obj) || $class_or_obj, $role);
 }
+
+sub UNIVERSAL::does {
+    my ($self, $role) = @_;
+    return _class_does_role(ref($self) || $self, $role);
+}
+
+#
+#
+# PRIVATE FUNCTIONS
 
 sub _get_role_methods_directly {
     my ($role) = @_;
@@ -47,7 +148,8 @@ sub _get_role_methods_directly {
 
 sub _class_can_handle_attributes {
     my ($class) = @_;
-    return $CAN_HANDLE_ATTR_CACHE{$class} if exists $CAN_HANDLE_ATTR_CACHE{$class};
+    return $CAN_HANDLE_ATTR_CACHE{$class}
+        if exists $CAN_HANDLE_ATTR_CACHE{$class};
 
     my $result = 0;
     if ($class->can('can_handle_attributes')) {
@@ -64,12 +166,6 @@ sub _class_can_handle_attributes {
     return $CAN_HANDLE_ATTR_CACHE{$class} = $result;
 }
 
-sub _clear_method_origin_cache {
-    my ($class) = @_;
-    my $prefix = "$class|";
-    delete @METHOD_ORIGIN_CACHE{ grep { /^\Q$prefix\E/ } keys %METHOD_ORIGIN_CACHE };
-}
-
 sub _ensure_role_loaded {
     my ($role) = @_;
     return if $ROLE_LOAD_CACHE{$role};
@@ -79,7 +175,8 @@ sub _ensure_role_loaded {
         eval { require $role_file };
         if ($@) {
             die "Failed to load role '$role': $@\n" .
-                "Make sure $role package uses 'use Role;' and is properly defined";
+                "Make sure $role package uses 'use Role;' ".
+                "and is properly defined";
         }
         $ROLE_LOAD_CACHE{$role} = 1;
         $IS_ROLE{$role} = 1;
@@ -104,57 +201,10 @@ sub _cache_role_methods {
     $ROLE_METHODS_CACHE{$role} = \@methods;
 }
 
-sub import {
-    my ($class, @args) = @_;
-    my $caller = caller;
-    no strict 'refs';
-
-    $IS_ROLE{$caller} = 1;
-
-    if (@args == 0) {
-        $REQUIRED_METHODS{$caller} = [];
-        *{"${caller}::requires"} = \&requires;
-        *{"${caller}::excludes"} = \&excludes;
-        *{"${caller}::has"} = \&_role_has;
-    } else {
-        _setup_role_application($caller, @args);
-    }
-
-    strict->import;
-    warnings->import;
-    _export_with($caller);
-}
-
 sub _export_with {
     my $caller = shift;
     no strict 'refs';
     *{"${caller}::with"} = \&with unless defined &{"${caller}::with"};
-}
-
-sub with {
-    my (@roles) = @_;
-    my $caller = caller;
-
-    # Called inside a ROLE
-    if ($IS_ROLE{$caller}) {
-        my ($clean_roles_ref, $aliases_by_role) = _process_role_arguments(@roles);
-        $METHOD_ALIASES{$caller} = $aliases_by_role;
-
-        foreach my $role (@$clean_roles_ref) {
-            _ensure_role_loaded($role);
-            push @{ $APPLIED_ROLES{$caller} ||= [] }, $role;
-
-            # Merge required methods
-            if (my $req = $REQUIRED_METHODS{$role}) {
-                push @{ $REQUIRED_METHODS{$caller} ||= [] }, @$req;
-            }
-        }
-
-        return;   # done for role
-    }
-
-    # Called inside a CLASS
-    apply_role($caller, @roles);
 }
 
 sub _ensure_class_base {
@@ -162,7 +212,8 @@ sub _ensure_class_base {
     return if $class->can('new');
     eval { require Class } unless $INC{'Class.pm'};
     no strict 'refs';
-    push @{"${class}::ISA"}, 'Class' unless grep { $_ eq 'Class' } @{"${class}::ISA"};
+    push @{"${class}::ISA"}, 'Class'
+        unless grep { $_ eq 'Class' } @{"${class}::ISA"};
 }
 
 sub _process_role_arguments {
@@ -185,20 +236,6 @@ sub _process_role_arguments {
     return \@roles, \%aliases_by_role;
 }
 
-sub requires {
-    my (@methods) = @_;
-    my $caller = caller;
-    $REQUIRED_METHODS{$caller} = [] unless exists $REQUIRED_METHODS{$caller};
-    push @{$REQUIRED_METHODS{$caller}}, @methods;
-}
-
-sub excludes {
-    my (@excluded_roles) = @_;
-    my $caller = caller;
-    $EXCLUDED_ROLES{$caller} = [] unless exists $EXCLUDED_ROLES{$caller};
-    push @{$EXCLUDED_ROLES{$caller}}, @excluded_roles;
-}
-
 sub _role_has {
     my ($attr_name, %spec) = @_;
     my $caller = caller;
@@ -213,149 +250,6 @@ sub _role_has {
     };
 }
 
-# Apply roles with proper conflict detection
-sub _apply_roles_and_track {
-    my ($class, $roles_ref) = @_;
-
-    $APPLIED_ROLES{$class} = [] unless exists $APPLIED_ROLES{$class};
-
-    # Pre-load all roles
-    foreach my $role (@$roles_ref) {
-        _ensure_role_loaded($role) unless $IS_ROLE{$role};
-    }
-
-    # For batch application, check conflicts between all roles first
-    if (@$roles_ref > 1) {
-        my @conflicts = _detect_batch_conflicts($class, $roles_ref);
-        if (@conflicts) {
-            # PREFER alias conflicts over direct conflicts
-            my $selected_conflict;
-            foreach my $conflict (@conflicts) {
-                if ($conflict->{is_alias}) {
-                    $selected_conflict = $conflict;
-                    last;  # Use the first alias conflict we find
-                }
-            }
-            # If no alias conflict found, use the first conflict
-            $selected_conflict ||= $conflicts[0];
-
-            if ($selected_conflict->{is_alias}) {
-                die "Method conflict: $selected_conflict->{method} (aliased to $selected_conflict->{alias}) between $selected_conflict->{existing_role} and $selected_conflict->{new_role} in class $class\n" .
-                    "Use aliasing or excludes to resolve";
-            } else {
-                die "Method conflict: method '$selected_conflict->{method}' provided by both '$selected_conflict->{existing_role}' and '$selected_conflict->{new_role}' in class '$class'.\n" .
-                    "Use aliasing or excludes to resolve.";
-            }
-        }
-    }
-
-    # Apply roles one by one
-    foreach my $role (@$roles_ref) {
-        next if grep { $_ eq $role } @{$APPLIED_ROLES{$class}};
-        _apply_single_role($class, $role);
-        push @{$APPLIED_ROLES{$class}}, $role;
-    }
-
-    _add_does_method($class);
-}
-
-sub _detect_batch_conflicts {
-    my ($class, $roles_ref) = @_;
-    my @conflicts;
-    my %method_owners;
-    my %role_aliases;
-
-    # Pre-load all aliases for each role
-    foreach my $role (@$roles_ref) {
-        $role_aliases{$role} = $METHOD_ALIASES{$class}->{$role} || {};
-    }
-
-    # Build method ownership map
-    foreach my $role (@$roles_ref) {
-        my $aliases_for_role = $role_aliases{$role};
-        my @methods = @{$ROLE_METHODS_CACHE{$role} || _get_role_methods_directly($role)};
-
-        foreach my $method (@methods) {
-            my $install_name = $aliases_for_role->{$method} || $method;
-
-            if (exists $method_owners{$install_name}) {
-                my $existing_info = $method_owners{$install_name};
-                my $existing_role = $existing_info->{role};
-
-                if ($existing_role ne $role) {
-
-                    # Sort role names for consistent error messages
-                    my ($role1, $role2) = sort ($existing_role, $role);
-
-                    # Check if either role is aliasing
-                    my $is_alias = 0;
-                    my $conflict_method_name = $install_name;
-                    my $alias_target = '';
-
-                    # Current role is aliasing
-                    if ($install_name ne $method) {
-                        $is_alias = 1;
-                        $conflict_method_name = $method;
-                        $alias_target = $install_name;
-                    }
-                    # Existing role was aliasing
-                    elsif ($install_name ne $existing_info->{original_method}) {
-                        $is_alias = 1;
-                        $conflict_method_name = $existing_info->{original_method};
-                        $alias_target = $install_name;
-                    }
-
-                    if ($is_alias) {
-                        push @conflicts, {
-                            method => $conflict_method_name,
-                            alias => $alias_target,
-                            existing_role => $role1,
-                            new_role => $role2,
-                            is_alias => 1
-                        };
-                    } else {
-                        push @conflicts, {
-                            method => $install_name,
-                            existing_role => $role1,
-                            new_role => $role2,
-                            is_alias => 0
-                        };
-                    }
-                }
-            } else {
-                $method_owners{$install_name} = {
-                    role => $role,
-                    original_method => $method
-                };
-            }
-        }
-    }
-
-    return @conflicts;
-}
-
-
-sub _apply_role_metadata {
-    my ($consumer, $role) = @_;
-
-    # Check role exclusions
-    if (my $excluded = $EXCLUDED_ROLES{$role}) {
-        my @violated = grep { _class_does_role($consumer, $_) } @$excluded;
-        if (@violated) {
-            die "Role '$role' cannot be composed with role(s): @violated\n";
-        }
-    }
-
-    # Merge required methods
-    if (my $req = $REQUIRED_METHODS{$role}) {
-        push @{ $REQUIRED_METHODS{$consumer} ||= [] }, @$req if ref($req) eq 'ARRAY' && @$req;
-    }
-
-    # Merge applied roles (for roles consuming roles)
-    push @{ $APPLIED_ROLES{$consumer} ||= [] }, $role unless grep { $_ eq $role } @{$APPLIED_ROLES{$consumer} || []};
-}
-
-# Apply single role with conflict detection against already applied roles
 sub _apply_single_role {
     my ($class, $role) = @_;
 
@@ -363,7 +257,8 @@ sub _apply_single_role {
     _ensure_role_loaded($role);
 
     # Skip if already applied
-    if ($APPLIED_ROLES{$class} && grep { $_ eq $role } @{$APPLIED_ROLES{$class}}) {
+    if ($APPLIED_ROLES{$class}
+        && grep { $_ eq $role } @{$APPLIED_ROLES{$class}}) {
         warn "Role '$role' is already applied to class '$class'";
         return;
     }
@@ -392,19 +287,34 @@ sub _apply_single_role {
     unless ($IS_ROLE{$class}) {
         my @missing;
         my $required = $REQUIRED_METHODS{$role} || [];
+
+        # Get methods provided by the role being applied
+        # so we don't treat them as missing.
+        my @role_provides = @{$ROLE_METHODS_CACHE{$role}
+            || _get_role_methods_directly($role)};
+        my %role_provides = map { $_ => 1 } @role_provides;
+
         foreach my $method (@$required) {
-            push @missing, $method unless $class->can($method);
+            # Check if the method is missing AND not provided
+            # by the role itself.
+            unless ($class->can($method) || $role_provides{$method}) {
+                push @missing, $method;
+            }
         }
         if (@missing) {
-            die "Role '$role' requires method(s) that are missing in class '$class': " . join(', ', @missing);
+            die "Role '$role' requires method(s) that are missing in ".
+                "class '$class': " . join(', ', @missing);
         }
     }
 
     # -----------------------------
     # Prepare methods and aliases
     # -----------------------------
-    my $aliases_for_role = $METHOD_ALIASES{$class} ? ($METHOD_ALIASES{$class}->{$role} || {}) : {};
-    my @methods_to_copy = @{$ROLE_METHODS_CACHE{$role} || _get_role_methods_directly($role)};
+    my $aliases_for_role =
+        $METHOD_ALIASES{$class}
+        ? ($METHOD_ALIASES{$class}->{$role} || {}) : {};
+    my @methods_to_copy =
+        @{$ROLE_METHODS_CACHE{$role} || _get_role_methods_directly($role)};
 
     # -----------------------------
     # Detect conflicts BEFORE installing
@@ -415,24 +325,24 @@ sub _apply_single_role {
 
         if ($class->can($install_name)) {
             my $origin = _find_method_origin($class, $install_name);
-            next if $origin eq $class || $origin eq $role; # skip class or same role
-
+            # Skip class or same role
+            next if $origin eq $class || $origin eq $role;
             my ($role1, $role2) = sort ($origin, $role);
 
             if ($install_name ne $name) {
                 push @conflicts, {
-                    method => $name,
-                    alias => $install_name,
+                    method        => $name,
+                    alias         => $install_name,
                     existing_role => $role1,
-                    new_role => $role2,
-                    is_alias => 1
+                    new_role      => $role2,
+                    is_alias      => 1
                 };
             } else {
                 push @conflicts, {
-                    method => $install_name,
+                    method        => $install_name,
                     existing_role => $role1,
-                    new_role => $role2,
-                    is_alias => 0
+                    new_role      => $role2,
+                    is_alias      => 0
                 };
             }
         }
@@ -446,9 +356,13 @@ sub _apply_single_role {
         $first ||= $conflicts[0];
 
         if ($first->{is_alias}) {
-            die "Method conflict: $first->{method} (aliased to $first->{alias}) between $first->{existing_role} and $first->{new_role}";
+            die "Method conflict: $first->{method} (aliased to " .
+                "$first->{alias}) between $first->{existing_role} " .
+                "and $first->{new_role}";
         } else {
-            die "Method conflict: method '$first->{method}' provided by both '$first->{existing_role}' and '$first->{new_role}'";
+            die "Method conflict: method '$first->{method}' provided " .
+                "by both '$first->{existing_role}' " .
+                "and '$first->{new_role}'";
         }
     }
 
@@ -460,7 +374,7 @@ sub _apply_single_role {
         no warnings 'redefine';
         foreach my $name (@methods_to_copy) {
             my $install_name = $aliases_for_role->{$name} || $name;
-            next if $class->can($install_name);  # class method wins
+            next if $class->can($install_name); # class method wins
             *{"${class}::${install_name}"} = *{"${role}::${name}"}{CODE};
         }
     }
@@ -469,7 +383,8 @@ sub _apply_single_role {
     # Add role to @ISA
     # -----------------------------
     no strict 'refs';
-    push @{"${class}::ISA"}, $role unless grep { $_ eq $role } @{"${class}::ISA"};
+    push @{"${class}::ISA"}, $role
+        unless grep { $_ eq $role } @{"${class}::ISA"};
 
     # -----------------------------
     # Add does() method
@@ -492,7 +407,8 @@ sub _apply_role_attributes {
     no strict 'refs';
     foreach my $attr_name (keys %$role_attrs) {
         my $attr_spec = $role_attrs->{$attr_name};
-        $Class::More::ATTRIBUTES{$class} = {} unless exists $Class::More::ATTRIBUTES{$class};
+        $Class::More::ATTRIBUTES{$class} = {}
+            unless exists $Class::More::ATTRIBUTES{$class};
         $Class::More::ATTRIBUTES{$class}{$attr_name} = $attr_spec;
 
         if (!defined *{"${class}::${attr_name}"}{CODE}) {
@@ -510,7 +426,8 @@ sub _apply_role_attributes {
 sub _find_method_origin {
     my ($class, $method) = @_;
     my $cache_key = "$class|$method";
-    return $METHOD_ORIGIN_CACHE{$cache_key} if exists $METHOD_ORIGIN_CACHE{$cache_key};
+    return $METHOD_ORIGIN_CACHE{$cache_key}
+        if exists $METHOD_ORIGIN_CACHE{$cache_key};
 
     no strict 'refs';
 
@@ -523,7 +440,8 @@ sub _find_method_origin {
                 my %reverse_aliases = reverse %$aliases;
                 my $original_name = $reverse_aliases{$method} || $method;
 
-                if (defined &{"${role}::${original_name}"} || exists $reverse_aliases{$method}) {
+                if (defined &{"${role}::${original_name}"}
+                    || exists $reverse_aliases{$method}) {
                     return $METHOD_ORIGIN_CACHE{$cache_key} = $role;
                 }
             }
@@ -547,7 +465,8 @@ sub _class_does_role {
     return 0 unless $IS_ROLE{$role};
     no strict 'refs';
     return 1 if grep { $_ eq $role } @{"${class}::ISA"};
-    return 1 if ($APPLIED_ROLES{$class} && grep { $_ eq $role } @{$APPLIED_ROLES{$class}});
+    return 1 if ($APPLIED_ROLES{$class}
+                && grep { $_ eq $role } @{$APPLIED_ROLES{$class}});
     return 0;
 }
 
@@ -561,51 +480,13 @@ sub _add_does_method {
     };
 }
 
-sub UNIVERSAL::does {
-    my ($self, $role) = @_;
-    return _class_does_role(ref($self) || $self, $role);
-}
-
-
-# Runtime role application - handles sequential application
-sub apply_role {
-    my ($class, @roles) = @_;
-    my $target_class = ref($class) ? ref($class) : $class;
-    my ($clean_roles_ref, $aliases_by_role) = _process_role_arguments(@roles);
-
-    # Merge aliases
-    $METHOD_ALIASES{$target_class} = {
-        %{$METHOD_ALIASES{$target_class} || {}},
-        %$aliases_by_role
-    };
-
-    # Apply roles one by one (sequential application)
-    foreach my $role (@$clean_roles_ref) {
-        _apply_single_role($target_class, $role);
-    }
-
-    _add_does_method($target_class);
-    return 1;
-}
-
-sub get_applied_roles {
-    my ($class) = @_;
-    my $target_class = ref($class) ? ref($class) : $class;
-    return @{$APPLIED_ROLES{$target_class} || []};
-}
-
-sub is_role {
-    my ($package) = @_;
-    return $IS_ROLE{$package};
-}
-
 =head1 NAME
 
 Role - A simple role system for Perl
 
 =head1 VERSION
 
-Version 0.04
+Version 0.05
 
 =head1 SYNOPSIS
 
@@ -638,21 +519,15 @@ Version 0.04
 =head2 Using Roles in Classes
 
     package My::Class;
-    use Class::More;  # or any class system
-    use Role::Printable;
-    use Role::Serialisable;
-
-    sub new {
-        my ($class, %args) = @_;
-        return bless \%args, $class;
-    }
+    use Class;
+    with qw/Role::Printable Role::Serialisable/;
 
     sub to_string {
         my $self = shift;
         return "My::Class instance";
     }
 
-    sub serialize { ... }
+    sub serialize   { ... }
     sub deserialize { ... }
 
     1;
@@ -660,9 +535,7 @@ Version 0.04
 =head2 Applying Roles at Runtime
 
     package My::Class;
-    use Class::More;
-
-    sub new { ... }
+    use Class;
 
     # Later, apply roles dynamically
     Role::apply_role(__PACKAGE__, 'Role::Printable');
@@ -672,9 +545,9 @@ Version 0.04
 =head2 Role Aliasing
 
     package My::Class;
-    use Class::More;
+    use Class;
     use Role::Printable => {
-        role => 'Role::Printable',
+        role  => 'Role::Printable',
         alias => { print => 'display' }
     };
 
@@ -690,7 +563,8 @@ Version 0.04
     use Role;
 
     package My::Class;
-    use Role::A;  # OK
+    use Class;
+    use Role::A;    # OK
     # use Role::B;  # This would die
 
 =head1 DESCRIPTION
@@ -781,7 +655,7 @@ class system.
 =head3 with
 
     package My::Class;
-    use Class::More;
+    use Class;
 
     with 'Role::A', 'Role::B';
 
@@ -857,8 +731,8 @@ Checks if a package is a role.
 
     # Usage in class:
     package My::Class;
-    use Class::More;
-    use Role::Timestamped;
+    use Class;
+    with qw/Role::Timestamped/;
 
     sub new {
         my ($class, %args) = @_;
@@ -872,7 +746,7 @@ Checks if a package is a role.
 =head2 Role with Aliasing
 
     package My::Class;
-    use Class::More;
+    use Class;
 
     # Avoid conflict by aliasing
     with

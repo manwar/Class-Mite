@@ -1,4 +1,4 @@
-#!/usr/bin/perl
+#!/usr/bin/env perl
 
 use strict;
 use warnings FATAL => 'all';
@@ -21,11 +21,11 @@ WriteMakefile(
     (eval { ExtUtils::MakeMaker->VERSION(6.46) } ? (META_MERGE => {
         'meta-spec' => { version => 2 },
         provides    => {
-            'Class::Mite'  => { file => 'lib/Class/Mite.pm',  version => '0.04' },
-            'Class::More'  => { file => 'lib/Class/More.pm',  version => '0.04' },
-            'Class::Clone' => { file => 'lib/Class/Clone.pm', version => '0.04' },
-            'Class'        => { file => 'lib/Class.pm',       version => '0.04' },
-            'Role'         => { file => 'lib/Role.pm',        version => '0.04' },
+            'Class::Mite'  => { file => 'lib/Class/Mite.pm',  version => '0.05' },
+            'Class::More'  => { file => 'lib/Class/More.pm',  version => '0.05' },
+            'Class::Clone' => { file => 'lib/Class/Clone.pm', version => '0.05' },
+            'Class'        => { file => 'lib/Class.pm',       version => '0.05' },
+            'Role'         => { file => 'lib/Role.pm',        version => '0.05' },
         },
         resources   => {
             repository => {

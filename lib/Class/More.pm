@@ -1,6 +1,6 @@
 package Class::More;
 
-$Class::More::VERSION    = '0.04';
+$Class::More::VERSION    = '0.05';
 $Class::More::AUTHORITY  = 'cpan:MANWAR';
 
 use strict;
@@ -299,7 +299,7 @@ Class::More - A fast, lightweight class builder for Perl
 
 =head1 VERSION
 
-Version 0.04
+Version 0.05
 
 =head1 SYNOPSIS
 

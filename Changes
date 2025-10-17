@@ -1,5 +1,8 @@
 Revision history for Class::Mite
 
+0.05  2025-10-17
+      - Support role composition
+
 0.04  2025-10-14
       - Role now 'has' function
 

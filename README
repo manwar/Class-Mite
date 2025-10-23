@@ -33,7 +33,7 @@ EXAMPLES
     }
 
     sub get_name { shift->{full_name} }
-    sub get_id   { shift->{id} }
+    sub get_id   { shift->{id}        }
 
     package main;
 

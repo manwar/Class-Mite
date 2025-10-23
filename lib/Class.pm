@@ -1,6 +1,6 @@
 package Class;
 
-$Class::VERSION   = '0.05';
+$Class::VERSION   = '0.06';
 $Class::AUTHORITY = 'cpan:MANWAR';
 
 use strict;
@@ -8,7 +8,7 @@ use warnings;
 use Exporter;
 use mro ();
 
-our @EXPORT = qw(extends with does);
+our @EXPORT = qw(extends with);
 our @ISA    = qw(Exporter);
 
 my %BUILD_METHODS_CACHE;
@@ -195,7 +195,7 @@ Class - Lightweight Perl object system with parent-first BUILD and method copyin
 
 =head1 VERSION
 
-Version 0.05
+Version 0.06
 
 =head1 SYNOPSIS
 

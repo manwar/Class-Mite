@@ -1,5 +1,9 @@
 Revision history for Class::Mite
 
+0.06  2025-10-23
+      - Added test for DOES/does in Class.
+      - Clean up export list in Class.
+
 0.05  2025-10-17
       - Support role composition
 

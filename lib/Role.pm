@@ -1,6 +1,6 @@
 package Role;
 
-$Role::VERSION   = '0.05';
+$Role::VERSION   = '0.06';
 $Role::AUTHORITY = 'cpan:MANWAR';
 
 use strict;
@@ -486,7 +486,7 @@ Role - A simple role system for Perl
 
 =head1 VERSION
 
-Version 0.05
+Version 0.06
 
 =head1 SYNOPSIS
 
